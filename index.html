@@ -237,7 +237,7 @@
                             <span class="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0">3</span>
                             <div>
                                 <h2 class="text-base font-bold text-slate-900">Kontrola a ruční úprava</h2>
-                                <p class="text-xs text-slate-500">Kliknutím na známku ji můžeš upravit.</p>
+                                <p class="text-xs text-slate-500">Kliknutím na jméno nebo známku je můžeš upravit. Jména se po změně seřadí.</p>
                             </div>
                         </div>
                         <span id="classNameBadge" class="bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 truncate max-w-[160px]">
@@ -294,7 +294,7 @@
                         </button>
                     </div>
                     <p class="text-xs text-slate-500 mb-2">
-                        Jména můžeš nadiktovat přes <strong>Win + H</strong> nebo vložit z EduPage/Excelu. Odděluj je čárkou, novým řádkem nebo mezerou. Při uložení se automaticky seřadí podle abecedy.
+                        Jména můžeš nadiktovat přes <strong>Win + H</strong> nebo vložit z EduPage/Excelu. Odděluj je čárkou, novým řádkem nebo mezerou. Rozdělené koncovky se spojí (např. „Nová ková“) a jména se seřadí.
                     </p>
                     <textarea id="modalStudentsInput" rows="8" placeholder="Novák, Svobodová, Dvořák, Černý..." class="w-full rounded-xl border border-slate-300 p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 leading-relaxed"></textarea>
                     <div class="flex justify-between items-center mt-1.5 text-xs text-slate-500">
@@ -336,7 +336,7 @@
 
         let classes = [];
         let currentClassId = '';
-        let manualOverrides = {}; // Ukládá ruční úpravy známek v tabulce: { studentIndex: "1–" }
+        let manualOverrides = {}; // Ruční úpravy známek podle aktuálního indexu žáka
         let modalMode = 'new'; // 'edit' nebo 'new'
 
         // =========================================================================
@@ -348,7 +348,12 @@
                 if (saved) {
                     const parsed = JSON.parse(saved);
                     if (Array.isArray(parsed)) {
-                        classes = parsed;
+                        classes = parsed.map(cls => ({
+                            ...cls,
+                            students: sortCzechAlphabetically(
+                                Array.isArray(cls.students) ? cls.students.map(normalizeStudentName) : []
+                            )
+                        }));
                     }
                 }
             } catch (e) {
@@ -503,7 +508,7 @@
             return bestMatch;
         }
 
-        // Převede nadiktovanou známku na standardizovaný formát s dlouhým mínuskem (1–, 2–, 3–, 4–)
+        // Známka s krátkým mínuskem: 1-, 2-, 3-, 4-
         function parseGradeString(rawGrade) {
             let g = normalizeText(rawGrade)
                 .replace(/[:.,;!?]/g, '')
@@ -531,14 +536,14 @@
             if (directMatch) {
                 const num = directMatch[1];
                 const sign = directMatch[2];
-                if (sign && sign !== '+') return `${num}–`; // Vždy dlouhé mínusko (en-dash)
+                if (sign && sign !== '+') return `${num}-`; // Krátké mínusko
                 if (sign === '+') return `${num}+`;
                 return num;
             }
 
             for (const item of numberMap) {
                 if (item.regex.test(g)) {
-                    if (hasMinus) return `${item.num}–`;
+                    if (hasMinus) return `${item.num}-`;
                     if (hasPlus) return `${item.num}+`;
                     return item.num;
                 }
@@ -681,7 +686,14 @@
 
                 tr.innerHTML = `
                     <td class="py-2.5 px-4 text-center text-xs text-slate-400 font-mono">${index + 1}</td>
-                    <td class="py-2.5 px-4">${escapeHtml(student)}</td>
+                    <td class="py-2 px-2">
+                        <input type="text" value="${escapeHtmlAttribute(student)}"
+                            aria-label="Jméno žáka ${index + 1}"
+                            onchange="handleStudentNameChange(${index}, this.value)"
+                            onkeydown="if (event.key === 'Enter') this.blur()"
+                            class="w-full min-w-[110px] rounded-lg border border-transparent bg-transparent hover:bg-white hover:border-slate-300 focus:bg-white focus:border-indigo-400 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
+                            title="Klikni a oprav jméno žáka" />
+                    </td>
                     <td class="py-2 px-4 text-center">
                         <input
                             type="text"
@@ -702,13 +714,48 @@
         }
 
         function handleManualGradeChange(index, newValue) {
-            const trimmed = newValue.trim();
-            if (!trimmed) {
-                manualOverrides[index] = 'n';
-            } else {
-                manualOverrides[index] = trimmed.replace(/^([1-5])-$/, '$1–');
+            const parsed = parseGradeString(newValue.trim());
+            if (!parsed) {
+                showToast('Použij známku 1 až 5, mínus, plus nebo n.');
+                processAndRender();
+                return;
             }
+            manualOverrides[index] = parsed;
             processAndRender();
+        }
+
+        function handleStudentNameChange(index, newValue) {
+            const cls = getCurrentClass();
+            if (!cls) return;
+            const changed = normalizeStudentName(newValue);
+            if (!changed) {
+                showToast('Jméno žáka nesmí být prázdné.');
+                processAndRender();
+                return;
+            }
+            if (cls.students.some((name, i) =>
+                i !== index && normalizeStudentKey(name) === normalizeStudentKey(changed))) {
+                showToast('Stejné jméno už je v seznamu.');
+                processAndRender();
+                return;
+            }
+            if (changed === cls.students[index]) return;
+            const rows = cls.students.map((name, i) => ({
+                name: i === index ? changed : name,
+                override: manualOverrides[i],
+                originalIndex: i
+            }));
+            rows.sort((a, b) => a.name.localeCompare(b.name, 'cs', { sensitivity: 'base' }) ||
+                a.originalIndex - b.originalIndex);
+            cls.students = rows.map(row => row.name);
+            manualOverrides = {};
+            rows.forEach((row, i) => {
+                if (row.override !== undefined) manualOverrides[i] = row.override;
+            });
+            saveClassesToStorage();
+            renderClassSelector();
+            processAndRender();
+            showToast('Jméno opraveno a seznam znovu seřazen.');
         }
 
         function clearDictation() {
@@ -767,11 +814,18 @@
         // =========================================================================
         function parseStudentListFromText(rawText) {
             if (!rawText) return [];
-            return rawText
-                .replace(/\d+\./g, ' ')
-                .split(/[\n,;]+|\s+/)
-                .map(s => s.trim())
-                .filter(s => s.length > 0 && s.toLowerCase() !== 'a');
+            const suffix = /^(?:ová|ova|ková|kova|šová|sova|vá|va)$/i;
+            const words = String(rawText).replace(/(^|\s)\d+\.\s*/g, ' ')
+                .split(/[\n,;]+|\s+/).map(word => word.trim()).filter(Boolean);
+            const result = [];
+            for (const word of words) {
+                if (suffix.test(word) && result.length && result[result.length - 1].length >= 3) {
+                    result[result.length - 1] += word.toLocaleLowerCase('cs');
+                } else if (normalizeText(word) !== 'a') {
+                    result.push(word);
+                }
+            }
+            return result.map(normalizeStudentName);
         }
 
         function sortCzechAlphabetically(list) {
@@ -883,6 +937,20 @@
         // =========================================================================
         // 7. POMOCNÉ FUNKCE
         // =========================================================================
+        function normalizeStudentKey(value) {
+            return normalizeText(String(value)).replace(/[^a-z0-9]/g, '');
+        }
+
+        function normalizeStudentName(value) {
+            return String(value || '').trim().replace(/\s+/g, ' ')
+                .replace(/(^|[\s-])([a-zá-ž])/giu,
+                    (match, separator, letter) => separator + letter.toLocaleUpperCase('cs'));
+        }
+
+        function escapeHtmlAttribute(value) {
+            return escapeHtml(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
