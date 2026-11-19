@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Obrázek → tabulka | Škola</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;color:#1e293b;background:#f8fafc}
+*{box-sizing:border-box}body{margin:0}header{background:#fff;border-bottom:1px solid #e2e8f0}
+.container{max-width:1230px;margin:auto;padding:20px}header .container{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding-top:14px;padding-bottom:14px}
+a{color:#4338ca}header a{font-weight:650;text-decoration:none}.brand{font-size:20px;font-weight:800;color:#0f172a}
+h1{font-size:clamp(24px,4vw,32px);line-height:1.2;margin:8px 0 10px}h2{font-size:17px;margin:0 0 12px}p{line-height:1.55}
+.muted{color:#64748b}.small{font-size:13px}.cards{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}.card{background:#fff;border:1px solid #e2e8f0;border-radius:17px;padding:19px;box-shadow:0 1px 3px #0f172a0d}
+button,.button{background:#4f46e5;border:1px solid #4f46e5;color:white;border-radius:10px;padding:10px 14px;min-height:42px;font:inherit;font-size:14px;font-weight:650;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px;text-decoration:none}
+button:hover,.button:hover{filter:brightness(.96)}button:disabled{opacity:.5;cursor:not-allowed}
+.secondary{background:#fff;color:#334155;border-color:#cbd5e1}.danger{color:#be123c;border-color:#fecdd3;background:#fff1f2}
+.controls{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+input,select,textarea{font:inherit;color:#0f172a;border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:9px 10px}
+select{min-height:42px}textarea{width:100%;min-height:145px;resize:vertical;line-height:1.45;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;tab-size:4}
+.drop{border:2px dashed #a5b4fc;background:#f5f7ff;border-radius:14px;min-height:160px;padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:7px;cursor:pointer}
+.drop.dragover{background:#e0e7ff;border-color:#4f46e5}.drop strong{font-size:16px}
+#preview{max-height:280px;max-width:100%;object-fit:contain;border-radius:10px;display:none;margin:15px auto 0;border:1px solid #cbd5e1}
+label{font-size:13px;font-weight:650}.status{margin:12px 0 0;font-size:13px;min-height:21px}
+progress{display:none;width:100%;height:10px;margin-top:8px;accent-color:#4f46e5}
+.wide{grid-column:1/-1}.table-wrap{overflow:auto;max-height:64vh;border:1px solid #e2e8f0;border-radius:12px}
+table{border-collapse:separate;border-spacing:0;width:100%;min-width:450px}
+td,th{border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:5px;text-align:left;vertical-align:middle}
+th{background:#f1f5f9;position:sticky;top:0;z-index:2}th:first-child,td:first-child{width:48px;text-align:center;background:#f8fafc}
+td input,th input{width:100%;min-width:100px;border:1px solid transparent;background:transparent;padding:8px}
+td input:focus,th input:focus{outline:2px solid #818cf8;background:white}
+.row-del{min-height:27px;width:31px;padding:3px;background:transparent;color:#be123c;border-color:transparent}
+.row-del:hover{background:#ffe4e6}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+.notice{background:#eef2ff;color:#3730a3;border-radius:10px;padding:11px 13px;font-size:13px;line-height:1.5}
+details{border-top:1px solid #e2e8f0;margin-top:18px;padding-top:14px}summary{cursor:pointer;font-size:14px;font-weight:650;color:#475569}
+@media(max-width:850px){.cards{grid-template-columns:1fr}.container{padding:14px}.card{padding:15px}.wide{grid-column:auto}}
+</style>
+<script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js"></script>
+</head>
+<body>
+<header><div class="container">
+<div class="brand">📷 Obrázek → tabulka</div>
+
+</div></header>
+<main class="container">
+<h1>Převeď screenshot na upravitelnou tabulku</h1>
+<p class="muted" style="margin-top:0">Vlož screenshot seznamu žáků, známek nebo jiné tabulky. Text rozpozná OCR přímo v prohlížeči. Výsledek zkontroluj, oprav a zkopíruj do Excelu či EduPage.</p>
+<div class="cards">
+<section class="card">
+<h2>1. Vlož obrázek</h2>
+<div class="drop" id="drop" tabindex="0" role="button" aria-label="Vybrat obrázek nebo vložit screenshot">
+<span aria-hidden="true" style="font-size:30px">🖼️</span>
+<strong>Klikni, přetáhni obrázek nebo stiskni Ctrl+V</strong>
+<span class="muted small">PNG, JPEG, WebP i screenshot ze schránky</span>
+</div>
+<input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp,image/gif" hidden>
+<img id="preview" alt="Náhled vloženého screenshotu">
+<p id="filename" class="small muted" aria-live="polite">Žádný obrázek není vybraný.</p>
+<div class="controls">
+<label for="language">Jazyk OCR</label>
+<select id="language"><option value="ces">Čeština</option><option value="slk">Slovenština</option><option value="eng">Angličtina</option></select>
+<button type="button" id="recognize" disabled>🔍 Rozpoznat text</button>
+</div>
+<progress id="progress" max="1" value="0"></progress>
+<p id="status" class="status muted" role="status" aria-live="polite">Vyber obrázek a spusť rozpoznání.</p>
+<div class="notice">🔒 Obrázek ani rozpoznané známky se neodesílají na náš server a neukládají na GitHub. OCR běží ve tvém prohlížeči. Při prvním použití se z internetu stáhne OCR knihovna a jazykový model; potřebuješ připojení.</div>
+</section>
+<section class="card">
+<h2>2. Kontrola přepisu</h2>
+<p class="small muted">Po rozpoznání zde uvidíš řádky se sloupci oddělenými tabulátorem. Můžeš je upravit a znovu sestavit tabulku. Pro ruční zadání lze vložit také text přímo sem.</p>
+<label for="raw">Rozpoznané řádky (sloupce odděluj tabulátorem)</label>
+<textarea id="raw" spellcheck="false" placeholder="Příjmení&#9;Známka&#10;Novák&#9;1&#10;Svobodová&#9;2−"></textarea>
+<div class="controls" style="margin-top:10px">
+<button id="fromText" class="secondary">↻ Sestavit tabulku z textu</button>
+<button id="copyText" class="secondary">Kopírovat text</button>
+</div>
+<details><summary>Zobrazit doslovný OCR přepis</summary>
+<pre id="literal" class="small" style="white-space:pre-wrap;overflow:auto;color:#475569">Zatím žádný přepis.</pre></details>
+</section>
+<section class="card wide">
+<div class="controls" style="justify-content:space-between;margin-bottom:12px">
+<div><h2 style="margin:0">3. Upravitelná tabulka</h2><p id="stats" class="muted small" style="margin:5px 0 0">0 řádků · 0 sloupců</p></div>
+<div class="controls">
+<button id="useHeader" class="secondary">První řádek → záhlaví</button>
+<button id="addRow" class="secondary">+ Řádek</button>
+<button id="addCol" class="secondary">+ Sloupec</button>
+<button id="delCol" class="secondary">− Poslední sloupec</button>
+</div>
+</div>
+<div class="table-wrap"><table id="table" aria-label="Upravitelná tabulka"><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+<p class="small muted">Všechna pole lze přepsat. Po OCR zkontroluj zejména jména, pořadí řádků a známky. Automatické rozdělení sloupců nemusí být dokonalé, zvlášť u méně ostrých screenshotů.</p>
+<div class="controls">
+<button id="copyTable">📋 Kopírovat tabulku</button>
+<button id="csv" class="secondary">⬇ Stáhnout CSV pro Excel</button>
+<button id="tsv" class="secondary">⬇ Stáhnout TSV</button>
+<button id="clear" class="danger">Vymazat data</button>
+</div>
+</section>
+</div>
+</main>
+<script>
+(function () {
+'use strict';
+const $ = id => document.getElementById(id);
+const elements = {file:$('file'),drop:$('drop'),preview:$('preview'),filename:$('filename'),language:$('language'),recognize:$('recognize'),progress:$('progress'),status:$('status'),raw:$('raw'),literal:$('literal'),thead:$('thead'),tbody:$('tbody'),stats:$('stats')};
+let imageFile = null, imageUrl = '', worker = null, workerLang = '', busy = false;
+let headers = ['Sloupec 1', 'Sloupec 2'], rows = [];
+function status(message,error) {elements.status.textContent=message;elements.status.style.color=error?'#b91c1c':'#64748b';}
+function setBusy(value) {busy=value;elements.recognize.disabled=busy||!imageFile;elements.progress.style.display=busy?'block':'none';}
+function isImage(file) {return !!file && (file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name||''));}
+function loadImage(file) {
+ if(!isImage(file)){status('Vybraný soubor není obrázek.',true);return;}
+ if(imageUrl) URL.revokeObjectURL(imageUrl);
+ imageFile=file;imageUrl=URL.createObjectURL(file);
+ elements.preview.src=imageUrl;elements.preview.style.display='block';
+ elements.filename.textContent=(file.name||'Screenshot ze schránky')+' · '+Math.round(file.size/1024)+' kB';
+ elements.recognize.disabled=busy;
+ status('Obrázek je připravený k rozpoznání.');
+}
+elements.drop.addEventListener('click',()=>elements.file.click());
+elements.drop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();elements.file.click();}});
+elements.file.addEventListener('change',e=>{if(e.target.files[0])loadImage(e.target.files[0]);e.target.value='';});
+['dragover','dragenter'].forEach(name=>elements.drop.addEventListener(name,e=>{e.preventDefault();elements.drop.classList.add('dragover');}));
+['dragleave','drop'].forEach(name=>elements.drop.addEventListener(name,e=>{e.preventDefault();elements.drop.classList.remove('dragover');}));
+elements.drop.addEventListener('drop',e=>{const file=Array.from(e.dataTransfer.files).find(isImage);if(file)loadImage(file);else status('Přetáhni prosím obrázek.',true);});
+document.addEventListener('paste',e=>{
+ const item=Array.from(e.clipboardData?.items||[]).find(i=>i.type.startsWith('image/'));
+ if(!item)return;
+ const file=item.getAsFile();if(file){e.preventDefault();loadImage(file);}
+});
+function parseTsv(tsv) {
+ const lines=String(tsv||'').trim().split(/\r?\n/);
+ const words=[];
+ for(const line of lines.slice(1)){
+  const p=line.split('\t');
+  if(p.length<12||p[0]!=='5')continue;
+  const text=p.slice(11).join('\t').trim();
+  if(!text)continue;
+  const left=Number(p[6]),top=Number(p[7]),width=Number(p[8]),height=Number(p[9]);
+  if(!Number.isFinite(left+top+width+height)||width<=0||height<=0)continue;
+  words.push({text,left,right:left+width,y:top+height/2,height});
+ }
+ if(!words.length)return [];
+ const hs=words.map(w=>w.height).sort((a,b)=>a-b),h=hs[Math.floor(hs.length/2)];
+ words.sort((a,b)=>a.y-b.y||a.left-b.left);
+ const lineRows=[];
+ for(const word of words){
+  let candidate=null,distance=Infinity;
+  for(const row of lineRows){
+   const d=Math.abs(row.y-word.y);
+   if(d<distance && d<=Math.max(6,h*.68)){candidate=row;distance=d;}
+  }
+  if(!candidate)lineRows.push({y:word.y,words:[word]});
+  else{candidate.words.push(word);candidate.y=candidate.words.reduce((s,w)=>s+w.y,0)/candidate.words.length;}
+ }
+ lineRows.sort((a,b)=>a.y-b.y);
+ const segments=lineRows.map(row=>{
+  row.words.sort((a,b)=>a.left-b.left);
+  const cells=[];
+  for(const w of row.words){
+   const last=cells[cells.length-1];
+   const gap=last ? w.left-last.right : Infinity;
+   if(last&&gap<=Math.max(14,h*1.55)){
+    last.text+=' '+w.text;last.right=Math.max(last.right,w.right);
+   }else cells.push({text:w.text,left:w.left,right:w.right});
+  }
+  return cells;
+ });
+ const all=segments.flat();const maxRight=Math.max(...all.map(c=>c.right));
+ const tolerance=Math.max(14,Math.min(42,maxRight*.025),h*1.25);
+ const clusters=[];
+ for(const segment of all.sort((a,b)=>a.left-b.left)){
+  let c=clusters.find(c=>Math.abs(c.x-segment.left)<=tolerance);
+  if(c){c.x=(c.x*c.count+segment.left)/(c.count+1);c.count++;}
+  else clusters.push({x:segment.left,count:1});
+ }
+ const minimum=Math.max(2,Math.ceil(segments.length*.24));
+ let anchors=clusters.filter(c=>c.count>=minimum).sort((a,b)=>a.x-b.x).map(c=>c.x);
+ if(!anchors.length || anchors.length===1 && segments.some(s=>s.length>1)){
+  anchors=clusters.sort((a,b)=>b.count-a.count).slice(0,Math.max(1,Math.min(8,Math.max(...segments.map(s=>s.length))))).sort((a,b)=>a.x-b.x).map(c=>c.x);
+ }
+ anchors=anchors.slice(0,15);
+ if(!anchors.length)anchors=[0];
+ const result=[];
+ for(const segs of segments){
+  const cells=Array(anchors.length).fill('');
+  for(const seg of segs){
+   let best=0,dist=Infinity;
+   anchors.forEach((x,i)=>{const d=Math.abs(x-seg.left);if(d<dist){dist=d;best=i;}});
+   cells[best]+=(cells[best]?' ':'')+seg.text;
+  }
+  result.push(cells);
+ }
+ return result.filter(row=>row.some(Boolean));
+}
+function parsePlainText(text) {
+ return String(text||'').replace(/\r/g,'').split('\n').filter(s=>s.trim()).map(line=>{
+  const parts=line.includes('\t')?line.split('\t'):line.split(/ {2,}/);
+  return parts.map(p=>p.trim());
+ });
+}
+function normalizeMatrix(data) {
+ const n=Math.min(30,Math.max(2,...data.map(r=>r.length)));
+ headers=Array.from({length:n},(_,i)=>'Sloupec '+(i+1));
+ rows=data.slice(0,5000).map(r=>Array.from({length:n},(_,i)=>String(r[i]||'')));
+ render();
+}
+function syncText() {elements.raw.value=rows.map(row=>row.join('\t')).join('\n');}
+function render() {
+ elements.thead.replaceChildren();elements.tbody.replaceChildren();
+ const tr=document.createElement('tr');const number=document.createElement('th');number.textContent='#';tr.append(number);
+ headers.forEach((name,i)=>{const th=document.createElement('th'),inp=document.createElement('input');inp.value=name;inp.setAttribute('aria-label','Název sloupce '+(i+1));inp.addEventListener('input',e=>{headers[i]=e.target.value;});th.append(inp);tr.append(th);});
+ const del=document.createElement('th');del.textContent='';tr.append(del);elements.thead.append(tr);
+ rows.forEach((row,i)=>{
+  const tr=document.createElement('tr'),index=document.createElement('td');index.textContent=i+1;tr.append(index);
+  headers.forEach((_,j)=>{
+   const td=document.createElement('td'),inp=document.createElement('input');
+   inp.value=row[j]||'';inp.setAttribute('aria-label','Řádek '+(i+1)+', sloupec '+(j+1));
+   inp.addEventListener('input',e=>{rows[i][j]=e.target.value;syncText();});
+   td.append(inp);tr.append(td);
+  });
+  const td=document.createElement('td'),btn=document.createElement('button');
+  btn.className='row-del';btn.title='Smazat řádek '+(i+1);btn.setAttribute('aria-label',btn.title);btn.textContent='×';
+  btn.addEventListener('click',()=>{rows.splice(i,1);render();syncText();});
+  td.append(btn);tr.append(td);elements.tbody.append(tr);
+ });
+ elements.stats.textContent=rows.length+' řádků · '+headers.length+' sloupců';
+}
+async function recognize() {
+ if(busy||!imageFile)return;
+ if(!window.Tesseract){status('Nepodařilo se načíst OCR knihovnu. Zkontroluj připojení a obnov stránku.',true);return;}
+ setBusy(true);elements.progress.value=0;status('Načítám OCR model…');
+ try{
+  const lang=elements.language.value;
+  if(worker&&workerLang!==lang){await worker.terminate();worker=null;workerLang='';}
+  if(!worker){
+   worker=await Tesseract.createWorker(lang,1,{logger:m=>{
+    if(typeof m.progress==='number')elements.progress.value=m.progress;
+    if(m.status) status(m.status==='recognizing text'?'Rozpoznávám text…': 'OCR: '+m.status);
+   }});
+   workerLang=lang;
+  }
+  const result=await worker.recognize(imageFile,{}, {tsv:true});
+  const data=result.data||{},parsed=parseTsv(data.tsv);
+  elements.literal.textContent=data.text||'OCR nevrátilo žádný text.';
+  if(parsed.length){normalizeMatrix(parsed);syncText();status('Rozpoznáno '+parsed.length+' řádků. Zkontroluj rozdělení a oprav případné chyby.');}
+  else if(String(data.text||'').trim()){
+   normalizeMatrix(parsePlainText(data.text));syncText();status('Text byl rozpoznán, ale nelze spolehlivě určit sloupce. Uprav je pomocí tabulátorů.',true);
+  }else status('Na obrázku se nepodařilo rozpoznat text. Zkus ostřejší screenshot.',true);
+ }catch(e){console.error(e);status('Rozpoznávání selhalo: '+(e.message||'neznámá chyba')+'. Zkus jiný obrázek nebo obnov stránku.',true);
+  if(worker){try{await worker.terminate();}catch(_){}worker=null;workerLang='';}
+ }finally{setBusy(false);}
+}
+elements.recognize.addEventListener('click',recognize);
+$('fromText').addEventListener('click',()=>{
+ if(rows.length&&!confirm('Nahradit stávající tabulku obsahem textového pole?'))return;
+ normalizeMatrix(parsePlainText(elements.raw.value));syncText();status('Tabulka byla sestavena z textu.');
+});
+$('addRow').addEventListener('click',()=>{rows.push(Array(headers.length).fill(''));render();syncText();});
+$('addCol').addEventListener('click',()=>{if(headers.length>=30)return;headers.push('Sloupec '+(headers.length+1));rows.forEach(r=>r.push(''));render();syncText();});
+$('delCol').addEventListener('click',()=>{if(headers.length<=1)return;headers.pop();rows.forEach(r=>r.pop());render();syncText();});
+$('useHeader').addEventListener('click',()=>{
+ if(!rows.length){status('Nejdřív vytvoř tabulku.',true);return;}
+ const first=rows.shift();headers=first.map((v,i)=>v||'Sloupec '+(i+1));render();syncText();
+});
+$('clear').addEventListener('click',()=>{
+ if(rows.length&&!confirm('Opravdu vymazat text i tabulku?'))return;
+ headers=['Sloupec 1','Sloupec 2'];rows=[];render();elements.raw.value='';elements.literal.textContent='Zatím žádný přepis.';status('Data byla smazána.');
+});
+function safeCell(value) {
+ const s=String(value??'');
+ // Ochrana před interpretací náhodně rozpoznaného vzorce v tabulkovém editoru.
+ return /^[\s]*[=+@-]/.test(s)?"'"+s:s;
+}
+function asTsv(){return [headers,...rows].map(r=>r.map(safeCell).join('\t')).join('\n');}
+function asCsv(){return '\uFEFF'+[headers,...rows].map(r=>r.map(v=>'"'+safeCell(v).replace(/"/g,'""')+'"').join(';')).join('\r\n');}
+async function copy(value) {
+ try{
+  if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(value);
+  else {
+   const ta=document.createElement('textarea');ta.value=value;ta.style.position='fixed';ta.style.opacity='0';document.body.append(ta);ta.select();
+   const ok=document.execCommand('copy');ta.remove();if(!ok)throw new Error('Schránka není dostupná');
+  }
+  status('Zkopírováno do schránky.');
+ }catch(e){status('Nelze automaticky kopírovat. Označ text a zkopíruj jej ručně.',true);}
+}
+function download(name,value,type){
+ const url=URL.createObjectURL(new Blob([value],{type}));
+ const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+$('copyText').addEventListener('click',()=>copy(elements.raw.value));
+$('copyTable').addEventListener('click',()=>copy(asTsv()));
+$('csv').addEventListener('click',()=>download('tabulka-ze-screenshotu.csv',asCsv(),'text/csv;charset=utf-8'));
+$('tsv').addEventListener('click',()=>download('tabulka-ze-screenshotu.tsv','\uFEFF'+asTsv(),'text/tab-separated-values;charset=utf-8'));
+window.addEventListener('pagehide',()=>{if(imageUrl)URL.revokeObjectURL(imageUrl);if(worker)worker.terminate().catch(()=>{});});
+render();
+})();
+</script>
+</body>
+</html>
