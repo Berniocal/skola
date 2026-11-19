@@ -227,11 +227,36 @@ function render() {
  });
  elements.stats.textContent=rows.length+' řádků · '+headers.length+' sloupců';
 }
+// Převod přes canvas obchází čtení lokálního File/Blob pomocí FileReaderu,
+// které na některých Android prohlížečích selhává s Code=0.
+async function prepareImageForOcr() {
+ const img=elements.preview;
+ if(typeof img.decode==='function') await img.decode();
+ else if(!img.complete||!img.naturalWidth) await new Promise((resolve,reject)=>{
+  img.addEventListener('load',resolve,{once:true});
+  img.addEventListener('error',()=>reject(Error('Náhled obrázku se nepodařilo načíst.')),{once:true});
+ });
+ const width=img.naturalWidth,height=img.naturalHeight;
+ if(!width||!height) throw Error('Obrázek nemá platné rozměry.');
+ // Fotografie s vysokým rozlišením omezíme kvůli paměti mobilních zařízení.
+ const scale=Math.min(1,2800/Math.max(width,height));
+ const canvas=document.createElement('canvas');
+ canvas.width=Math.max(1,Math.round(width*scale));
+ canvas.height=Math.max(1,Math.round(height*scale));
+ const ctx=canvas.getContext('2d');
+ if(!ctx)throw Error('Prohlížeč nepodporuje přípravu obrázku.');
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+ ctx.drawImage(img,0,0,canvas.width,canvas.height);
+ // Důležité: OCR dostane přímo PNG data URL, nikoli File, Blob ani canvas.
+ return canvas.toDataURL('image/png');
+}
 async function recognize() {
  if(busy||!imageFile)return;
  if(!window.Tesseract){status('Nepodařilo se načíst OCR knihovnu. Zkontroluj připojení a obnov stránku.',true);return;}
  setBusy(true);elements.progress.value=0;status('Načítám OCR model…');
  try{
+  status('Připravuji obrázek pro OCR…');
+  const imageData=await prepareImageForOcr();
   const lang=elements.language.value;
   if(worker&&workerLang!==lang){await worker.terminate();worker=null;workerLang='';}
   if(!worker){
@@ -241,7 +266,7 @@ async function recognize() {
    }});
    workerLang=lang;
   }
-  const result=await worker.recognize(imageFile,{}, {tsv:true});
+  const result=await worker.recognize(imageData,{}, {tsv:true});
   const data=result.data||{},parsed=parseTsv(data.tsv);
   elements.literal.textContent=data.text||'OCR nevrátilo žádný text.';
   if(parsed.length){normalizeMatrix(parsed);syncText();status('Rozpoznáno '+parsed.length+' řádků. Zkontroluj rozdělení a oprav případné chyby.');}
