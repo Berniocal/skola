@@ -55,7 +55,7 @@
                 </div>
                 <div>
                     <h1 class="text-lg sm:text-xl font-bold text-slate-900 leading-tight">Diktování známek</h1>
-                    <p class="text-xs text-slate-500">Hlasový přepis (Win + H) &rarr; seřazený sloupeček pro EduPage</p>
+                    <p class="text-xs text-slate-500">Diktuj přímo do seznamu &rarr; zkopíruj známky do EduPage</p>
                 </div>
             </div>
 
@@ -136,12 +136,24 @@
                         </button>
                     </div>
 
-                    <textarea
-                        id="dictationInput"
-                        rows="6"
-                        class="w-full rounded-xl border border-slate-300 bg-slate-50/50 focus:bg-white p-3.5 text-base text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition leading-relaxed"
-                        placeholder="Sem klikni, zmáčkni Win + H a diktuj... Např.: Novák 2, Svobodová 2 mínus, Dvořák 1, Černý 3... (Nepřečteným žákům se automaticky doplní malé n)"
-                    ></textarea>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button type="button" id="speechButton" onclick="toggleSpeechRecognition()" class="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-3 rounded-xl shadow-sm transition cursor-pointer" aria-pressed="false">
+                            <span aria-hidden="true">🎙️</span><span id="speechButtonText">Spustit diktování</span>
+                        </button>
+                        <div class="flex-1 min-w-[180px]">
+                            <p id="speechStatus" role="status" aria-live="polite" class="text-sm font-medium text-slate-600">Řekni příjmení a známku, například „Novák dva mínus“.</p>
+                            <p id="speechLastHeard" class="text-xs text-slate-400 mt-1 break-words"></p>
+                        </div>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-3">Rozpoznané známky se rovnou zobrazují v seznamu vpravo. Jména i známky tam můžeš opravit. Hlasový přepis může využívat online službu poskytovatele prohlížeče.</p>
+                    <details class="mt-3 pt-3 border-t border-slate-100 group">
+                        <summary class="flex items-center gap-2 text-xs font-semibold text-indigo-600 cursor-pointer">
+                            <span>⌨️ Vložit text nebo diktovat přes Win + H (záložní možnost)</span>
+                        </summary>
+                        <textarea id="dictationInput" rows="3"
+                            class="mt-2 w-full rounded-xl border border-slate-300 bg-slate-50/50 p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            placeholder="Např. Novák 2, Svobodová 2 mínus, Dvořák 1. Známky se hned přiřazují v tabulce."></textarea>
+                    </details>
 
                     <!-- Upozornění na nerozpoznaná jména / chyby přepisu -->
                     <div id="warningBox" class="hidden mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900">
@@ -338,6 +350,10 @@
         let currentClassId = '';
         let manualOverrides = {}; // Ruční úpravy známek podle aktuálního indexu žáka
         let modalMode = 'new'; // 'edit' nebo 'new'
+        let speechRecognition = null;
+        let speechHistory = '';
+        let speechSessionFinals = [];
+        let speechInterim = '';
 
         // =========================================================================
         // 2. INICIALIZACE A LOKÁLNÍ ÚLOŽIŠTĚ (POUZE V PROHLÍŽEČI POČÍTAČE)
@@ -366,8 +382,8 @@
 
             // Event listenery
             document.getElementById('classSelect').addEventListener('change', (e) => {
+                resetDictationState();
                 currentClassId = e.target.value;
-                manualOverrides = {};
                 processAndRender();
             });
 
@@ -376,6 +392,7 @@
             });
 
             document.getElementById('modalStudentsInput').addEventListener('input', updateModalStudentCount);
+            updateSpeechUI();
         }
 
         function saveClassesToStorage() {
@@ -444,6 +461,115 @@
         // =========================================================================
         // 3. CHYTRÉ ROZPOZNÁVÁNÍ ČESKÉHO HLASOVÉHO PŘEPISU (WIN + H)
         // =========================================================================
+
+        // Rozpoznávaný hlas rovnou přepočítává tabulku. Přepsaný text není nutné
+        // nejprve vkládat do textového pole (Win + H zůstává jako záloha).
+        function getDictationText() {
+            return [speechHistory, speechSessionFinals.join(' '), speechInterim,
+                document.getElementById('dictationInput').value].filter(Boolean).join(' ').trim();
+        }
+
+        function updateSpeechUI() {
+            const button = document.getElementById('speechButton');
+            const label = document.getElementById('speechButtonText');
+            const status = document.getElementById('speechStatus');
+            if (!button) return;
+            const available = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+            button.disabled = !available;
+            button.classList.toggle('opacity-50', !available);
+            button.classList.toggle('cursor-not-allowed', !available);
+            button.classList.toggle('bg-rose-600', !!speechRecognition);
+            button.classList.toggle('hover:bg-rose-700', !!speechRecognition);
+            button.classList.toggle('bg-indigo-600', !speechRecognition);
+            button.classList.toggle('hover:bg-indigo-700', !speechRecognition);
+            button.setAttribute('aria-pressed', speechRecognition ? 'true' : 'false');
+            label.textContent = speechRecognition ? 'Zastavit diktování' : 'Spustit diktování';
+            status.textContent = !available
+                ? 'Prohlížeč nepodporuje rozpoznávání hlasu. Použij Win + H níže.'
+                : speechRecognition
+                    ? 'Poslouchám… Diktuj příjmení a známky, tabulka se vyplňuje průběžně.'
+                    : 'Řekni příjmení a známku, například „Novák dva mínus“.';
+        }
+
+        function toggleSpeechRecognition() {
+            if (speechRecognition) {
+                speechRecognition.stop();
+                return;
+            }
+            const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechAPI) {
+                updateSpeechUI();
+                return;
+            }
+            const recognition = new SpeechAPI();
+            recognition.lang = 'cs-CZ';
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            speechSessionFinals = [];
+            speechInterim = '';
+            speechRecognition = recognition;
+            recognition.onresult = event => {
+                if (speechRecognition !== recognition) return;
+                const finals = [];
+                const provisional = [];
+                for (let i = 0; i < event.results.length; i++) {
+                    const phrase = event.results[i][0].transcript.trim();
+                    if (event.results[i].isFinal) finals.push(phrase);
+                    else provisional.push(phrase);
+                }
+                speechSessionFinals = finals;
+                speechInterim = provisional.join(' ');
+                const recent = speechInterim || finals[finals.length - 1] || '';
+                document.getElementById('speechLastHeard').textContent =
+                    recent ? 'Právě rozpoznáno: ' + recent : '';
+                processAndRender();
+            };
+            recognition.onerror = event => {
+                if (speechRecognition !== recognition) return;
+                const descriptions = {
+                    'not-allowed': 'Přístup k mikrofonu nebyl povolen.',
+                    'audio-capture': 'Mikrofon není dostupný.',
+                    'network': 'Rozpoznávání hlasu má potíže s připojením.'
+                };
+                if (event.error !== 'no-speech' && event.error !== 'aborted') {
+                    showToast(descriptions[event.error] || 'Rozpoznávání hlasu se přerušilo.');
+                }
+            };
+            recognition.onend = () => {
+                if (speechRecognition !== recognition) return;
+                speechHistory = [speechHistory, speechSessionFinals.join(' ')].filter(Boolean).join(' ');
+                speechSessionFinals = [];
+                speechInterim = '';
+                speechRecognition = null;
+                updateSpeechUI();
+                processAndRender();
+            };
+            updateSpeechUI();
+            try {
+                recognition.start();
+            } catch (error) {
+                speechRecognition = null;
+                updateSpeechUI();
+                showToast('Mikrofon se nepodařilo spustit.');
+            }
+        }
+
+        function resetDictationState() {
+            if (speechRecognition) {
+                const recognition = speechRecognition;
+                speechRecognition = null;
+                recognition.onend = null; // Při smazání se nesmí vrátit starý přepis.
+                recognition.stop();
+            }
+            speechHistory = '';
+            speechSessionFinals = [];
+            speechInterim = '';
+            manualOverrides = {};
+            document.getElementById('dictationInput').value = '';
+            document.getElementById('speechLastHeard').textContent = '';
+            updateSpeechUI();
+        }
+
         function normalizeText(str) {
             return str
                 .toLowerCase()
@@ -629,7 +755,7 @@
             const cls = getCurrentClass();
             if (!cls) return;
 
-            const text = document.getElementById('dictationInput').value;
+            const text = getDictationText();
             document.getElementById('classNameBadge').textContent = cls.name;
 
             const { assignedGrades, unmatchedItems } = parseDictationText(text, cls.students);
@@ -750,11 +876,9 @@
         }
 
         function clearDictation() {
-            document.getElementById('dictationInput').value = '';
-            manualOverrides = {};
+            resetDictationState();
             processAndRender();
-            document.getElementById('dictationInput').focus();
-            showToast('Zadání vymazáno, můžeš diktovat další sadu.');
+            showToast('Známky vymazány, můžeš diktovat další sadu.');
         }
 
         // =========================================================================
