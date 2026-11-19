@@ -474,38 +474,55 @@
         }
 
         function findBestStudentMatch(spokenToken, students) {
-            const normSpoken = normalizeText(spokenToken);
-            if (!normSpoken || normSpoken.length < 2) return null;
-
-            // 1. Přesná shoda
+            const spoken = normalizeStudentKey(spokenToken);
+            if (spoken.length < 2) return null;
+            const exactMatches = [];
             for (let i = 0; i < students.length; i++) {
-                if (students[i].toLowerCase() === spokenToken.toLowerCase()) {
-                    return { index: i, distance: 0 };
+                if (normalizeStudentKey(students[i]) === spoken) exactMatches.push(i);
+            }
+            if (exactMatches.length === 1) return { index: exactMatches[0], distance: 0 };
+            if (exactMatches.length > 1) return null;
+
+            let best = null;
+            let ambiguous = false;
+            for (let i = 0; i < students.length; i++) {
+                const target = normalizeStudentKey(students[i]);
+                if (Math.abs(spoken.length - target.length) > 2) continue;
+                const distance = levenshteinDistance(spoken, target);
+                const allowed = target.length <= 5 ? 1 : 2;
+                if (distance > allowed) continue;
+                if (!best || distance < best.distance) {
+                    best = { index: i, distance };
+                    ambiguous = false;
+                } else if (distance === best.distance) {
+                    ambiguous = true; // Dvě stejně podobná příjmení: nepřiřazovat naslepo.
                 }
             }
+            return ambiguous ? null : best;
+        }
 
-            // 2. Shoda bez diakritiky
-            for (let i = 0; i < students.length; i++) {
-                if (normalizeText(students[i]) === normSpoken) {
-                    return { index: i, distance: 0.1 };
+        function isGradeToken(token) {
+            const norm = normalizeText(token);
+            return /^[1-5]([-–—+])?$/.test(norm) ||
+                /^[-–—+]$/.test(norm) ||
+                /^(minus|min|pul|plus|jedna|jednicka|jednicku|prvni|dva|dve|dvojka|dvojku|tri|trojka|trojku|ctyri|ctyrka|ctyrku|pet|petka|petku|n|neklasifikovan|neklasifikovana|chybi|nic)$/.test(norm);
+        }
+
+        // „Nová ková“ či „Svobodo vá“ se zkouší i jako jeden celek.
+        function matchStudentAt(tokens, start, students) {
+            const phrase = [];
+            let best = null;
+            for (let width = 1; width <= 4 && start + width <= tokens.length; width++) {
+                const token = tokens[start + width - 1];
+                if (!token || isGradeToken(token)) break;
+                phrase.push(token);
+                const match = findBestStudentMatch(phrase.join(' '), students);
+                if (match && (!best || match.distance < best.distance ||
+                    (match.distance === best.distance && width > best.width))) {
+                    best = { ...match, width, spoken: phrase.join(' ') };
                 }
             }
-
-            // 3. Fuzzy shoda (tolerance překlepů ASR)
-            let bestMatch = null;
-            let bestDist = Infinity;
-
-            for (let i = 0; i < students.length; i++) {
-                const normStudent = normalizeText(students[i]);
-                const dist = levenshteinDistance(normSpoken, normStudent);
-                const maxAllowed = normStudent.length <= 5 ? 1 : 2;
-                if (dist <= maxAllowed && dist < bestDist) {
-                    bestDist = dist;
-                    bestMatch = { index: i, distance: dist };
-                }
-            }
-
-            return bestMatch;
+            return best;
         }
 
         // Známka s krátkým mínuskem: 1-, 2-, 3-, 4-
@@ -555,79 +572,53 @@
         function parseDictationText(text, students) {
             const assignedGrades = new Array(students.length).fill('n');
             const unmatchedItems = [];
-
-            if (!text || !text.trim()) {
-                return { assignedGrades, unmatchedItems };
-            }
+            if (!text || !text.trim()) return { assignedGrades, unmatchedItems };
 
             const cleaned = text
                 .replace(/([a-zA-Zá-žÁ-Ž])\s*[:–—-]\s*([1-5nN])/g, '$1 $2')
-                .replace(/([1-5])\s*[-–—]\s*(?=[,\n;.]|$|\s+[a-zA-Zá-žÁ-Ž])/g, '$1– ')
-                .replace(/[,\n;.!?]+/g, ' | ');
+                .replace(/([1-5])\s*[-–—](?=\s|$|[,;.!?])/g, '$1-')
+                .replace(/[,\n;.!?]+/g, ' ');
+            const tokens = cleaned.split(/\s+/).filter(Boolean);
+            const fillerWords = new Set(['za', 'ma', 'dostal', 'dostala', 'znamka', 'znamku',
+                's', 'se', 'a', 'pak', 'dale', 'jeste']);
+            let studentIndex = null;
+            let studentLabel = '';
+            let gradeTokens = [];
 
-            const rawTokens = cleaned.split(/\s+/).filter(Boolean);
-            const fillerWords = new Set(['za', 'ma', 'dostal', 'dostala', 'znamka', 'znamku', 's', 'se', 'a', 'pak', 'dale', 'jeste']);
-
-            let currentStudentIdx = null;
-            let currentStudentToken = '';
-            let gradeBuffer = [];
-
-            function flushCurrentStudent() {
-                if (currentStudentIdx !== null) {
-                    if (gradeBuffer.length > 0) {
-                        const combinedGrade = gradeBuffer.join(' ');
-                        const parsed = parseGradeString(combinedGrade);
-                        if (parsed) {
-                            assignedGrades[currentStudentIdx] = parsed;
-                        } else {
-                            unmatchedItems.push(`${currentStudentToken} (neznámá známka: „${combinedGrade}“)`);
-                        }
-                    }
+            function flush() {
+                if (studentIndex !== null && gradeTokens.length) {
+                    const parsed = parseGradeString(gradeTokens.join(' '));
+                    if (parsed) assignedGrades[studentIndex] = parsed;
+                    else unmatchedItems.push(studentLabel + ' (neznámá známka: „' +
+                        gradeTokens.join(' ') + '“)');
                 }
-                currentStudentIdx = null;
-                currentStudentToken = '';
-                gradeBuffer = [];
+                studentIndex = null;
+                studentLabel = '';
+                gradeTokens = [];
             }
 
-            for (let i = 0; i < rawTokens.length; i++) {
-                const token = rawTokens[i];
-
-                if (token === '|') {
-                    flushCurrentStudent();
-                    continue;
-                }
-
+            for (let i = 0; i < tokens.length; i++) {
+                const token = tokens[i];
                 const norm = normalizeText(token);
-
-                const isGradePart =
-                    /^[1-5]([-–—+])?$/.test(norm) ||
-                    /^[-–—+]$/.test(norm) ||
-                    /^(minus|plus|jedna|jednicka|dva|dve|dvojka|tri|trojka|ctyri|ctyrka|pet|petka|n|neklasifikovan)$/.test(norm);
-
-                if (isGradePart && currentStudentIdx !== null) {
-                    gradeBuffer.push(token);
+                if (isGradeToken(token) && studentIndex !== null) {
+                    gradeTokens.push(token);
                     continue;
                 }
-
-                if (fillerWords.has(norm)) {
-                    continue;
-                }
-
-                flushCurrentStudent();
-
-                const match = findBestStudentMatch(token, students);
+                if (fillerWords.has(norm)) continue;
+                const match = matchStudentAt(tokens, i, students);
                 if (match) {
-                    currentStudentIdx = match.index;
-                    currentStudentToken = token;
-                } else {
-                    if (norm.length >= 2 && !/^\d+$/.test(norm)) {
-                        unmatchedItems.push(`„${token}“`);
-                    }
+                    flush();
+                    studentIndex = match.index;
+                    studentLabel = match.spoken;
+                    i += match.width - 1;
+                    continue;
+                }
+                if (studentIndex !== null && gradeTokens.length) flush();
+                if (norm.length >= 2 && !/^\d+$/.test(norm) && !isGradeToken(token)) {
+                    unmatchedItems.push('„' + token + '“');
                 }
             }
-
-            flushCurrentStudent();
-
+            flush();
             return { assignedGrades, unmatchedItems };
         }
 
