@@ -48,7 +48,7 @@ details{border-top:1px solid #e2e8f0;margin-top:18px;padding-top:14px}summary{cu
 </div></header>
 <main class="container">
 <h1>Převeď screenshoty na tabulku docházky</h1>
-<p class="muted" style="margin-top:0">Nahraj jeden nebo více screenshotů docházky (každý obrázek = 1 vyučovací hodina). Aplikace automaticky rozpozná rozložení karet (3 i 4 sloupce), přečte jména a spočítá účast na hodinách.</p>
+<p class="muted" style="margin-top:0">Nahraj jeden nebo více screenshotů docházky (každý obrázek = 1 vyučovací hodina). Aplikace automaticky rozpozná rozložení karet (3 i 4 sloupce), očistí jména a chytře spáruje stejné žáky napříč všemi fotkami.</p>
 
 <div class="cards">
 <section class="card">
@@ -80,7 +80,7 @@ details{border-top:1px solid #e2e8f0;margin-top:18px;padding-top:14px}summary{cu
 </div>
 <progress id="progress" max="1" value="0"></progress>
 <p id="status" class="status muted" role="status" aria-live="polite">Vyber obrázky a spusť rozpoznání.</p>
-<div class="notice">🔒 Obrázky se nikam neodesílají, vše běží lokálně v prohlížeči. Aplikace sama detekuje počet sloupců karet (3, 4 i více) a přečte každou kartičku zvlášť.</div>
+<div class="notice">🔒 Obrázky se nikam neodesílají, vše běží lokálně v prohlížeči. Aplikace ořízne ikony kolem jmen, vyfiltruje jen skutečná jména žáků a automaticky spáruje i drobné překlepy OCR mezi fotkami (např. Dufek / Duřek).</div>
 </section>
 
 <section class="card">
@@ -107,7 +107,7 @@ details{border-top:1px solid #e2e8f0;margin-top:18px;padding-top:14px}summary{cu
 </div>
 </div>
 <div class="table-wrap"><table id="table" aria-label="Upravitelná tabulka"><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
-<p class="small muted">Všechna pole lze kliknutím přepsat. Pokud má některý žák špatně přečtené písmeno ve jméně, stačí jej upravit nebo smazat řádek křížkem vpravo.</p>
+<p class="small muted">Všechna pole lze kliknutím přepsat.</p>
 <div class="controls">
 <button id="copyTable">📋 Kopírovat tabulku</button>
 <button id="csv" class="secondary">⬇ Stáhnout CSV pro Excel</button>
@@ -221,7 +221,6 @@ document.addEventListener('paste', e => {
   addImages(items.map(i => i.getAsFile()).filter(Boolean));
 });
 
-// Načte obrázek na plátno v originálním rozlišení (pro přesnou detekci mřížky karet)
 async function loadOriginalCanvas(url) {
   const img = new Image();
   img.src = url;
@@ -244,22 +243,18 @@ async function loadOriginalCanvas(url) {
 function detectCardGrid(ctx, W, H) {
   const imgData = ctx.getImageData(0, 0, W, H).data;
 
-  // Pomocná funkce: pozná pixel patřící do kartičky (čistě bílá, světle růžová nebo světle žlutá)
-  // vs. šedé mezery/stíny mezi kartami nebo tmavé fotky obličejů
   const isCardBg = (x, y) => {
     const idx = (y * W + x) * 4;
     const r = imgData[idx], g = imgData[idx + 1], b = imgData[idx + 2];
-    // Karta je buď bílá (R,G,B >= 248), růžová (R >= 245, R-G >= 15), nebo žlutá (R>=248, G>=245, B<=238)
     const isWhite = r >= 248 && g >= 248 && b >= 248;
     const isPink = r >= 245 && (r - g) >= 15 && (r - b) >= 12;
     const isYellow = r >= 248 && g >= 245 && b <= 238;
     return isWhite || isPink || isYellow;
   };
 
-  // 1. Najdeme svislé sloupce karet pomocí horizontální projekce
-  // Pro každý sloupec x spočítáme, kolik procent výšky (v zóně karet 10%..92% H) tvoří čisté pozadí karty
-  const yTopScan = Math.round(H * 0.10);
-  const yBotScan = Math.round(H * 0.92);
+  // Zóna karet je mezi 8 % a 91 % výšky (vynecháme horní lištu a spodní tlačítka "Opakovat docházku...")
+  const yTopScan = Math.round(H * 0.08);
+  const yBotScan = Math.round(H * 0.91);
   const scanH = Math.max(1, yBotScan - yTopScan);
 
   const colScore = new Float32Array(W);
@@ -271,9 +266,6 @@ function detectCardGrid(ctx, W, H) {
     colScore[x] = hits / (scanH / 2);
   }
 
-  // Sloupec karet má velkou plochu čistého bílého/růžového pozadí v pravé části karty (kde je text)
-  // a vlevo je fotka obličeje (nižší skóre), mezi kartami je šedá mezera (skóre blízko 0).
-  // Vyhladíme profil oknem 15 px a najdeme souvislé bloky karet.
   const smoothX = new Float32Array(W);
   const winX = Math.max(5, Math.round(W * 0.012));
   for (let x = 0; x < W; x++) {
@@ -284,7 +276,6 @@ function detectCardGrid(ctx, W, H) {
     smoothX[x] = sum / cnt;
   }
 
-  // Zjistíme práh pro detekci vnitřku karty
   const colBlocks = [];
   let inCol = false, cStart = 0;
   for (let x = 0; x < W; x++) {
@@ -292,29 +283,28 @@ function detectCardGrid(ctx, W, H) {
       inCol = true; cStart = x;
     } else if (inCol && (smoothX[x] <= 0.25 || x === W - 1)) {
       inCol = false;
-      if (x - cStart > W * 0.08) { // platný sloupec má šířku aspoň 8 % obrázku
+      if (x - cStart > W * 0.08) {
         colBlocks.push({ x1: cStart, x2: x });
       }
     }
   }
 
-  // Rozšíříme každý detekovaný blok doleva o šířku fotky obličeje, abychom měli celou kartu od levého okraje
-  // Typická karta má fotku vlevo (cca 26 % šířky karty) a text vpravo (74 % šířky karty).
+  // U každého sloupce ořízneme zprava 12 % textové části (tam je malá šipka rozbalovacího menu),
+  // a zleva necháme jen textovou část bez fotky obličeje!
   const fullCols = colBlocks.map(b => {
     const textW = b.x2 - b.x1;
     const estCardW = textW / 0.72;
     const cardLeft = Math.max(0, Math.round(b.x2 - estCardW));
+    const safeLeft = Math.max(cardLeft + Math.round(estCardW * 0.28), b.x1 + 2);
+    const safeRight = Math.max(safeLeft + 20, b.x2 - Math.round(estCardW * 0.07));
     return {
-      cardLeft,
-      cardRight: b.x2,
-      textLeft: Math.max(cardLeft + Math.round(estCardW * 0.27), b.x1 - 4),
-      textRight: b.x2
+      textLeft: safeLeft,
+      textRight: safeRight
     };
   });
 
-  // 2. Najdeme vodorovné řádky karet pomocí vertikální projekce uvnitř textových částí sloupců
   const rowScore = new Float32Array(H);
-  for (let y = 0; y < H; y++) {
+  for (let y = 0; y < yBotScan; y++) {
     let hits = 0, total = 0;
     for (const col of fullCols) {
       for (let x = col.textLeft; x < col.textRight; x += 3) {
@@ -327,24 +317,21 @@ function detectCardGrid(ctx, W, H) {
 
   const rowBlocks = [];
   let inRow = false, rStart = 0;
-  for (let y = 0; y < H; y++) {
+  for (let y = 0; y < yBotScan; y++) {
     if (!inRow && rowScore[y] > 0.45) {
       inRow = true; rStart = y;
-    } else if (inRow && (rowScore[y] <= 0.35 || y === H - 1)) {
+    } else if (inRow && (rowScore[y] <= 0.35 || y === yBotScan - 1)) {
       inRow = false;
       const rh = y - rStart;
-      // Platná karta má výšku mezi 4 % a 16 % výšky obrázku
-      if (rh >= H * 0.04 && rh <= H * 0.16) {
+      if (rh >= H * 0.045 && rh <= H * 0.16) {
         rowBlocks.push({ y1: rStart, y2: y });
       }
     }
   }
 
-  // Sestavíme seznam všech jednotlivých kartiček (řádek po řádku, sloupec po sloupci)
   const cards = [];
   for (const r of rowBlocks) {
     for (const c of fullCols) {
-      // Zkontrolujeme, zda v této konkrétní buňce mřížky opravdu je karta (např. buňka vlevo nahoře s "2A4" nemá text pípnutí)
       let bgHits = 0, total = 0, pinkHits = 0;
       for (let y = r.y1 + 4; y < r.y2 - 4; y += 2) {
         for (let x = c.textLeft + 4; x < c.textRight - 4; x += 2) {
@@ -358,7 +345,6 @@ function detectCardGrid(ctx, W, H) {
           }
         }
       }
-      // Pokud má buňka alespoň 35 % pozadí karty (zbytek tvoří černá písmena a ikonky), je to platná karta
       if (total > 0 && (bgHits / total) > 0.35) {
         cards.push({
           x: c.textLeft,
@@ -374,16 +360,16 @@ function detectCardGrid(ctx, W, H) {
   return cards;
 }
 
-// Vyřízne jednu kartičku, odřízne horní část s ikonou fajfky/mínusu a 3x ji zvětší pro 100% čitelnost
+// Vyřízne textovou zónu karty (odřízne horních 42 % s kulatou ikonou fajfky/mínusu!)
 function cropCardForOcr(sourceCanvas, card) {
-  // Horních ~36 % výšky karty zabírá zelená fajfka nebo červené mínus – to nepotřebujeme číst!
-  // Text (Jméno a Pípnutí) je vždy v dolních 64 % karty.
-  const cropY = Math.round(card.y + card.h * 0.33);
-  const cropH = Math.max(10, Math.round(card.h * 0.67));
+  // Horních 42 % karty je prázdné místo s kulatou ikonou fajfky/mínusu.
+  // Jméno je přesně mezi 42 % a 66 % výšky karty, Pípnutí pod ním.
+  const cropY = Math.round(card.y + card.h * 0.41);
+  const cropH = Math.max(10, Math.round(card.h * 0.57));
   const cropX = Math.max(0, card.x);
   const cropW = Math.max(10, card.w);
 
-  const scale = 3; // 3x zvětšení zaručí bezchybné přečtení české diakritiky (Š, Č, Ř, Ž, Ě, Í)
+  const scale = 3;
   const c = document.createElement('canvas');
   c.width = cropW * scale;
   c.height = cropH * scale;
@@ -394,7 +380,36 @@ function cropCardForOcr(sourceCanvas, card) {
   return c.toDataURL('image/png');
 }
 
-// Rozparsuje text jedné jediné kartičky (1. řádek = Jméno, 2. řádek = Pípnutí, 3. řádek = poznámka)
+// Přísná validace a očištění jména žáka
+function cleanAndValidateName(rawName) {
+  if (!rawName) return null;
+
+  // Odstraníme všechno, co nejsou česká písmena, mezera nebo pomlčka
+  let s = rawName
+    .replace(/[^a-zA-ZáčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Rozdělíme na slova a vyhodíme jednopísmenné zbytky ikon na začátku nebo na konci (např. "B ", "Ť ", " é", " i")
+  let words = s.split(' ').filter(Boolean);
+  while (words.length > 0 && words[0].length === 1) words.shift();
+  while (words.length > 0 && words[words.length - 1].length === 1) words.pop();
+
+  // Skutečné jméno žáka má 2 až 3 slova (Příjmení + Jméno)
+  if (words.length < 2 || words.length > 3) return null;
+
+  // Každé slovo musí mít alespoň 2 písmena a začínat VELKÝM písmenem
+  const validWords = words.every(w => w.length >= 2 && /^[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]/.test(w));
+  if (!validWords) return null;
+
+  // Vyloučíme případná klíčová slova rozhraní
+  const joined = words.join(' ');
+  if (/^(Pípnutí|Pipnuti|Hodina|Fyzika|Opakovat|Fotografie|Vyplnit|Chybějící)/i.test(joined)) return null;
+
+  return joined;
+}
+
+// Rozparsuje text jedné kartičky
 function parseSingleCardText(rawText, isRedCard) {
   const lines = String(rawText || '')
     .split(/\r?\n/)
@@ -403,47 +418,84 @@ function parseSingleCardText(rawText, isRedCard) {
 
   if (!lines.length) return null;
 
-  // Ignorujeme prázdnou kartu s nápisem třídy (např. "2A4")
-  if (lines.length === 1 && /^\d+[A-Z]\d+$/i.test(lines[0])) return null;
-
-  let name = '';
+  let rawNameCandidate = '';
   let pipnuti = '';
   let note = '';
 
   const pipIndex = lines.findIndex(l => /p[ií]pnut[ií]/i.test(l));
 
   if (pipIndex > 0) {
-    name = lines[pipIndex - 1];
+    rawNameCandidate = lines[pipIndex - 1];
     pipnuti = lines[pipIndex].replace(/^.*?p[ií]pnut[ií]:?\s*/i, '').trim();
     if (lines[pipIndex + 1]) note = lines[pipIndex + 1];
-  } else if (pipIndex === 0) {
-    // Kdyby se jméno náhodou nepřečetlo
-    return null;
-  } else {
-    // Pokud se slovo "Pípnutí" nepřečetlo přesně, první řádek bez čísel je jméno
-    const cand = lines.find(l => !/\d/.test(l) && l.length >= 4);
-    if (!cand) return null;
-    name = cand;
-    const rest = lines.filter(l => l !== cand);
-    if (rest[0]) pipnuti = rest[0].replace(/^.*?p[ií]pnut[ií]:?\s*/i, '').trim();
-    if (rest[1]) note = rest[1];
+  } else if (pipIndex === -1) {
+    // Pokud se slovo "Pípnutí" uřízlo nebo nepřečetlo, vezmeme 1. řádek jako kandidáta na jméno
+    rawNameCandidate = lines[0];
+    if (lines[1]) pipnuti = lines[1].replace(/^.*?p[ií]pnut[ií]:?\s*/i, '').trim();
+    if (lines[2]) note = lines[2];
   }
 
-  // Očistíme jméno od případných artefaktů ikon na začátku/konci
-  name = name
-    .replace(/^[^a-zA-ZáčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]+/, '')
-    .replace(/[^a-zA-ZáčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]+$/, '')
+  const cleanName = cleanAndValidateName(rawNameCandidate);
+  if (!cleanName) return null;
+
+  // Očistíme pípnutí od zbytků ikon malého kolečka/čtverečku za časem (např. "8:50-14:06 p" -> "8:50-14:06")
+  pipnuti = pipnuti
+    .replace(/[\[\]()©>]/g, '')
+    .replace(/\s+[a-zA-Z]{1,2}$/, '')
     .trim();
 
-  // Musí to být jméno (alespoň 4 znaky, bez čísel, alespoň dvě slova nebo jedno delší)
-  if (name.length < 4 || /\d/.test(name)) return null;
-
   return {
-    name,
+    name: cleanName,
     present: !isRedCard,
     pipnuti: pipnuti || (isRedCard ? 'Ne' : '-'),
-    note
+    note: note.replace(/[^\wáčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ():.\s-]/g, '').trim()
   };
+}
+
+// Levenshteinova vzdálenost pro chytré párování jmen s drobným překlepem OCR (např. Dufek vs Duřek)
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const matrix = Array.from({ length: b.length + 1 }, (_, i) => [i]);
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      const cost = b[i - 1] === a[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+function normKey(name) {
+  return name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
+}
+
+// Najde existujícího žáka v mapě (buď přesná shoda, nebo rozdíl max 2 písmena u delších jmen)
+function findMatchingStudentKey(studentMap, newName) {
+  const targetKey = normKey(newName);
+  if (!targetKey) return null;
+  if (studentMap.has(targetKey)) return targetKey;
+
+  let bestKey = null;
+  let bestDist = Infinity;
+  const maxAllowedDist = targetKey.length >= 10 ? 2 : 1;
+
+  for (const existingKey of studentMap.keys()) {
+    // Musí sedět aspoň první písmeno příjmení, aby se nesloučili např. Kamm Daniel a Kamm David
+    if (existingKey[0] !== targetKey[0]) continue;
+    const dist = levenshtein(existingKey, targetKey);
+    if (dist <= maxAllowedDist && dist < bestDist) {
+      bestDist = dist;
+      bestKey = existingKey;
+    }
+  }
+  return bestKey || targetKey;
 }
 
 // Původní parser pro obecné tabulky
@@ -558,10 +610,6 @@ function render() {
   elements.stats.textContent = rows.length + ' řádků · ' + headers.length + ' sloupců';
 }
 
-function normKey(name) {
-  return name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
-}
-
 async function recognize() {
   if (busy || !imageFiles.length) return;
   if (!window.Tesseract) {
@@ -597,7 +645,6 @@ async function recognize() {
         status(`Hodina ${i + 1}/${totalImgs}: hledám kartičky žáků…`);
         const { canvas, ctx, width, height } = await loadOriginalCanvas(imageFiles[i].url);
 
-        // Přečteme hlavičku nahoře (jestli tam je např. "Hodina 3.")
         let lessonLabel = `Hodina ${i + 1}`;
         try {
           const headC = document.createElement('canvas');
@@ -622,17 +669,17 @@ async function recognize() {
           const cardDataUrl = cropCardForOcr(canvas, detectedCards[c]);
           const res = await worker.recognize(cardDataUrl);
           const rawCardText = (res.data?.text || '').trim();
-          imgLiteral.push(`[Karta ${c + 1} | ${detectedCards[c].isRed ? 'ČERVENÁ' : 'BÍLÁ'}]: ${rawCardText.replace(/\n+/g, ' / ')}`);
-
           const st = parseSingleCardText(rawCardText, detectedCards[c].isRed);
+          imgLiteral.push(`[Karta ${c + 1} | ${detectedCards[c].isRed ? 'ČERVENÁ' : 'BÍLÁ'}]: ${st ? 'OK -> ' + st.name : 'IGNOROVÁNO'} (${rawCardText.replace(/\n+/g, ' / ')})`);
           if (st) parsedStudents.push(st);
         }
 
         allLiteralText.push(imgLiteral.join('\n'));
 
         for (const st of parsedStudents) {
-          const key = normKey(st.name);
+          const key = findMatchingStudentKey(studentMap, st.name);
           if (!key) continue;
+
           if (!studentMap.has(key)) {
             studentMap.set(key, {
               displayName: st.name,
@@ -642,6 +689,9 @@ async function recognize() {
             });
           }
           const record = studentMap.get(key);
+          // Ochrana proti dvojímu započtení téhož žáka v rámci jedné fotky
+          if (record.lessons[i] !== '—') continue;
+
           if (st.present) {
             record.presentCount++;
             record.lessons[i] = `Přítomen (${st.pipnuti})`;
@@ -668,7 +718,7 @@ async function recognize() {
         ]);
         normalizeMatrix(matrix, tableHeaders);
         syncText();
-        status(`Hotovo! Zpracováno ${totalImgs} hodin a nalezeno ${sortedStudents.length} žáků.`);
+        status(`Hotovo! Zpracováno ${totalImgs} hodin a spárováno ${sortedStudents.length} žáků.`);
       } else {
         status('Nepodařilo se rozpoznat karty žáků. Zkus ostřejší screenshot nebo přepni na "Obecná tabulka".', true);
       }
