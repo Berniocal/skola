@@ -48,7 +48,7 @@ details{border-top:1px solid #e2e8f0;margin-top:18px;padding-top:14px}summary{cu
 </div></header>
 <main class="container">
 <h1>Převeď screenshoty na tabulku docházky</h1>
-<p class="muted" style="margin-top:0">Nahraj jeden nebo více screenshotů docházky (každý obrázek = 1 vyučovací hodina). Aplikace přečte jména, rozpozná přítomnost podle barvy karty a spočítá účast na hodinách.</p>
+<p class="muted" style="margin-top:0">Nahraj jeden nebo více screenshotů docházky (každý obrázek = 1 vyučovací hodina). Aplikace automaticky rozpozná rozložení karet (3 i 4 sloupce), přečte jména a spočítá účast na hodinách.</p>
 
 <div class="cards">
 <section class="card">
@@ -80,7 +80,7 @@ details{border-top:1px solid #e2e8f0;margin-top:18px;padding-top:14px}summary{cu
 </div>
 <progress id="progress" max="1" value="0"></progress>
 <p id="status" class="status muted" role="status" aria-live="polite">Vyber obrázky a spusť rozpoznání.</p>
-<div class="notice">🔒 Obrázky se nikam neodesílají, vše běží lokálně v prohlížeči. Aplikace čte každý ze 3 sloupců karet zvlášť a orientuje se podle textu „Pípnutí:“ a červeného pozadí karty.</div>
+<div class="notice">🔒 Obrázky se nikam neodesílají, vše běží lokálně v prohlížeči. Aplikace sama detekuje počet sloupců karet (3, 4 i více) a přečte každou kartičku zvlášť.</div>
 </section>
 
 <section class="card">
@@ -107,7 +107,7 @@ details{border-top:1px solid #e2e8f0;margin-top:18px;padding-top:14px}summary{cu
 </div>
 </div>
 <div class="table-wrap"><table id="table" aria-label="Upravitelná tabulka"><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
-<p class="small muted">Všechna pole lze kliknutím přepsat. Pokud má některý žák v obrázku špatně přečtené písmeno ve jméně, stačí jej upravit nebo smazat řádek křížkem vpravo.</p>
+<p class="small muted">Všechna pole lze kliknutím přepsat. Pokud má některý žák špatně přečtené písmeno ve jméně, stačí jej upravit nebo smazat řádek křížkem vpravo.</p>
 <div class="controls">
 <button id="copyTable">📋 Kopírovat tabulku</button>
 <button id="csv" class="secondary">⬇ Stáhnout CSV pro Excel</button>
@@ -221,8 +221,8 @@ document.addEventListener('paste', e => {
   addImages(items.map(i => i.getAsFile()).filter(Boolean));
 });
 
-// Převod obrázku na plátno s 2x zvětšením (zvětšení dramaticky zlepší přesnost OCR malého písma v kartách)
-async function prepareImageCanvas(url, upscale = 2) {
+// Načte obrázek na plátno v originálním rozlišení (pro přesnou detekci mřížky karet)
+async function loadOriginalCanvas(url) {
   const img = new Image();
   img.src = url;
   if (typeof img.decode === 'function') await img.decode();
@@ -232,161 +232,218 @@ async function prepareImageCanvas(url, upscale = 2) {
   });
   const width = img.naturalWidth, height = img.naturalHeight;
   if (!width || !height) throw Error('Obrázek nemá platné rozměry.');
-  
-  const maxDim = 3600;
-  const scale = Math.min(upscale, maxDim / Math.max(width, height));
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(width * scale));
-  canvas.height = Math.max(1, Math.round(height * scale));
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  return { canvas, ctx, dataUrl: canvas.toDataURL('image/png') };
+  ctx.drawImage(img, 0, 0);
+  return { canvas, ctx, width, height };
 }
 
-// Zjistí, zda má karta v okolí zadaných souřadnic růžové/červené pozadí (nepřítomen)
-function isCardRed(ctx, x, y, width, height) {
-  const startX = Math.max(0, Math.round(x));
-  const startY = Math.max(0, Math.round(y));
-  const sampleW = Math.min(ctx.canvas.width - startX, Math.max(40, Math.round(width)));
-  const sampleH = Math.min(ctx.canvas.height - startY, Math.max(40, Math.round(height)));
-  if (sampleW <= 0 || sampleH <= 0) return false;
+// Automatická detekce mřížky karet (funguje pro 2, 3, 4 i 5 sloupců)
+function detectCardGrid(ctx, W, H) {
+  const imgData = ctx.getImageData(0, 0, W, H).data;
 
-  const imgData = ctx.getImageData(startX, startY, sampleW, sampleH).data;
-  let redTintPixels = 0;
-  let totalPixels = 0;
+  // Pomocná funkce: pozná pixel patřící do kartičky (čistě bílá, světle růžová nebo světle žlutá)
+  // vs. šedé mezery/stíny mezi kartami nebo tmavé fotky obličejů
+  const isCardBg = (x, y) => {
+    const idx = (y * W + x) * 4;
+    const r = imgData[idx], g = imgData[idx + 1], b = imgData[idx + 2];
+    // Karta je buď bílá (R,G,B >= 248), růžová (R >= 245, R-G >= 15), nebo žlutá (R>=248, G>=245, B<=238)
+    const isWhite = r >= 248 && g >= 248 && b >= 248;
+    const isPink = r >= 245 && (r - g) >= 15 && (r - b) >= 12;
+    const isYellow = r >= 248 && g >= 245 && b <= 238;
+    return isWhite || isPink || isYellow;
+  };
 
-  for (let i = 0; i < imgData.length; i += 16) {
-    const r = imgData[i], g = imgData[i + 1], b = imgData[i + 2];
-    totalPixels++;
-    // Růžové pozadí karty má R výrazně vyšší než G i B
-    if (r > 205 && (r - g) > 16 && (r - b) > 14) {
-      redTintPixels++;
+  // 1. Najdeme svislé sloupce karet pomocí horizontální projekce
+  // Pro každý sloupec x spočítáme, kolik procent výšky (v zóně karet 10%..92% H) tvoří čisté pozadí karty
+  const yTopScan = Math.round(H * 0.10);
+  const yBotScan = Math.round(H * 0.92);
+  const scanH = Math.max(1, yBotScan - yTopScan);
+
+  const colScore = new Float32Array(W);
+  for (let x = 0; x < W; x++) {
+    let hits = 0;
+    for (let y = yTopScan; y < yBotScan; y += 2) {
+      if (isCardBg(x, y)) hits++;
+    }
+    colScore[x] = hits / (scanH / 2);
+  }
+
+  // Sloupec karet má velkou plochu čistého bílého/růžového pozadí v pravé části karty (kde je text)
+  // a vlevo je fotka obličeje (nižší skóre), mezi kartami je šedá mezera (skóre blízko 0).
+  // Vyhladíme profil oknem 15 px a najdeme souvislé bloky karet.
+  const smoothX = new Float32Array(W);
+  const winX = Math.max(5, Math.round(W * 0.012));
+  for (let x = 0; x < W; x++) {
+    let sum = 0, cnt = 0;
+    for (let k = Math.max(0, x - winX); k <= Math.min(W - 1, x + winX); k++) {
+      sum += colScore[k]; cnt++;
+    }
+    smoothX[x] = sum / cnt;
+  }
+
+  // Zjistíme práh pro detekci vnitřku karty
+  const colBlocks = [];
+  let inCol = false, cStart = 0;
+  for (let x = 0; x < W; x++) {
+    if (!inCol && smoothX[x] > 0.35) {
+      inCol = true; cStart = x;
+    } else if (inCol && (smoothX[x] <= 0.25 || x === W - 1)) {
+      inCol = false;
+      if (x - cStart > W * 0.08) { // platný sloupec má šířku aspoň 8 % obrázku
+        colBlocks.push({ x1: cStart, x2: x });
+      }
     }
   }
-  return totalPixels > 0 && (redTintPixels / totalPixels) > 0.22;
-}
 
-// Rozřeže plátno na 3 svislé sloupce karet (textovou část bez fotek obličejů!)
-function sliceColumnsFromCanvas(sourceCanvas) {
-  const W = sourceCanvas.width;
-  const H = sourceCanvas.height;
-  // Karty jsou rozloženy ve 3 sloupcích (0-33%, 33-66%, 66-100%).
-  // V každém sloupci je vlevo fotka žáka (cca prvních 28 % šířky sloupce), kterou ořízneme pryč,
-  // aby OCR nečetlo obličeje ani kulaté ikony fajfek jako písmena!
-  const colSpecs = [
-    { xStart: Math.round(W * 0.095), xEnd: Math.round(W * 0.325) },
-    { xStart: Math.round(W * 0.425), xEnd: Math.round(W * 0.655) },
-    { xStart: Math.round(W * 0.755), xEnd: Math.round(W * 0.985) }
-  ];
-
-  return colSpecs.map(spec => {
-    const cw = spec.xEnd - spec.xStart;
-    const c = document.createElement('canvas');
-    c.width = cw;
-    c.height = H;
-    const cctx = c.getContext('2d');
-    cctx.fillStyle = '#fff';
-    cctx.fillRect(0, 0, cw, H);
-    cctx.drawImage(sourceCanvas, spec.xStart, 0, cw, H, 0, 0, cw, H);
+  // Rozšíříme každý detekovaný blok doleva o šířku fotky obličeje, abychom měli celou kartu od levého okraje
+  // Typická karta má fotku vlevo (cca 26 % šířky karty) a text vpravo (74 % šířky karty).
+  const fullCols = colBlocks.map(b => {
+    const textW = b.x2 - b.x1;
+    const estCardW = textW / 0.72;
+    const cardLeft = Math.max(0, Math.round(b.x2 - estCardW));
     return {
-      xOffset: spec.xStart,
-      width: cw,
-      dataUrl: c.toDataURL('image/png')
+      cardLeft,
+      cardRight: b.x2,
+      textLeft: Math.max(cardLeft + Math.round(estCardW * 0.27), b.x1 - 4),
+      textRight: b.x2
     };
   });
+
+  // 2. Najdeme vodorovné řádky karet pomocí vertikální projekce uvnitř textových částí sloupců
+  const rowScore = new Float32Array(H);
+  for (let y = 0; y < H; y++) {
+    let hits = 0, total = 0;
+    for (const col of fullCols) {
+      for (let x = col.textLeft; x < col.textRight; x += 3) {
+        total++;
+        if (isCardBg(x, y)) hits++;
+      }
+    }
+    rowScore[y] = total > 0 ? hits / total : 0;
+  }
+
+  const rowBlocks = [];
+  let inRow = false, rStart = 0;
+  for (let y = 0; y < H; y++) {
+    if (!inRow && rowScore[y] > 0.45) {
+      inRow = true; rStart = y;
+    } else if (inRow && (rowScore[y] <= 0.35 || y === H - 1)) {
+      inRow = false;
+      const rh = y - rStart;
+      // Platná karta má výšku mezi 4 % a 16 % výšky obrázku
+      if (rh >= H * 0.04 && rh <= H * 0.16) {
+        rowBlocks.push({ y1: rStart, y2: y });
+      }
+    }
+  }
+
+  // Sestavíme seznam všech jednotlivých kartiček (řádek po řádku, sloupec po sloupci)
+  const cards = [];
+  for (const r of rowBlocks) {
+    for (const c of fullCols) {
+      // Zkontrolujeme, zda v této konkrétní buňce mřížky opravdu je karta (např. buňka vlevo nahoře s "2A4" nemá text pípnutí)
+      let bgHits = 0, total = 0, pinkHits = 0;
+      for (let y = r.y1 + 4; y < r.y2 - 4; y += 2) {
+        for (let x = c.textLeft + 4; x < c.textRight - 4; x += 2) {
+          total++;
+          const idx = (y * W + x) * 4;
+          const R = imgData[idx], G = imgData[idx + 1], B = imgData[idx + 2];
+          if (R >= 245 && (R - G) >= 15 && (R - B) >= 12) {
+            bgHits++; pinkHits++;
+          } else if ((R >= 248 && G >= 248 && B >= 248) || (R >= 248 && G >= 245 && B <= 238)) {
+            bgHits++;
+          }
+        }
+      }
+      // Pokud má buňka alespoň 35 % pozadí karty (zbytek tvoří černá písmena a ikonky), je to platná karta
+      if (total > 0 && (bgHits / total) > 0.35) {
+        cards.push({
+          x: c.textLeft,
+          y: r.y1,
+          w: c.textRight - c.textLeft,
+          h: r.y2 - r.y1,
+          isRed: (pinkHits / total) > 0.25
+        });
+      }
+    }
+  }
+
+  return cards;
 }
 
-// Zpracuje jeden svislý sloupec karet (kotví se podle slova "Pípnutí:")
-function parseSingleColumn(tsv, fullCtx, xOffset, colWidth) {
-  const lines = String(tsv || '').trim().split(/\r?\n/);
-  const words = [];
-  for (const line of lines.slice(1)) {
-    const p = line.split('\t');
-    if (p.length < 12 || p[0] !== '5') continue;
-    const text = p.slice(11).join('\t').trim();
-    if (!text) continue;
-    const left = Number(p[6]), top = Number(p[7]), width = Number(p[8]), height = Number(p[9]);
-    if (!Number.isFinite(left + top + width + height) || width <= 0 || height <= 0) continue;
-    words.push({ text, left, top, right: left + width, bottom: top + height, y: top + height / 2, height });
-  }
-  if (!words.length) return [];
+// Vyřízne jednu kartičku, odřízne horní část s ikonou fajfky/mínusu a 3x ji zvětší pro 100% čitelnost
+function cropCardForOcr(sourceCanvas, card) {
+  // Horních ~36 % výšky karty zabírá zelená fajfka nebo červené mínus – to nepotřebujeme číst!
+  // Text (Jméno a Pípnutí) je vždy v dolních 64 % karty.
+  const cropY = Math.round(card.y + card.h * 0.33);
+  const cropH = Math.max(10, Math.round(card.h * 0.67));
+  const cropX = Math.max(0, card.x);
+  const cropW = Math.max(10, card.w);
 
-  // Seskupení slov do řádků (v rámci jednoho sloupce už nehrozí smíchání se sousední kartou)
-  words.sort((a, b) => a.y - b.y || a.left - b.left);
-  const textLines = [];
-  for (const w of words) {
-    let target = textLines.find(l => Math.abs(l.y - w.y) <= Math.max(10, w.height * 0.65));
-    if (target) {
-      target.words.push(w);
-      target.y = target.words.reduce((s, item) => s + item.y, 0) / target.words.length;
-      target.top = Math.min(target.top, w.top);
-      target.bottom = Math.max(target.bottom, w.bottom);
-    } else {
-      textLines.push({ y: w.y, top: w.top, bottom: w.bottom, words: [w] });
-    }
-  }
-  textLines.sort((a, b) => a.y - b.y);
-  textLines.forEach(l => {
-    l.words.sort((a, b) => a.left - b.left);
-    l.text = l.words.map(w => w.text).join(' ').trim();
-  });
+  const scale = 3; // 3x zvětšení zaručí bezchybné přečtení české diakritiky (Š, Č, Ř, Ž, Ě, Í)
+  const c = document.createElement('canvas');
+  c.width = cropW * scale;
+  c.height = cropH * scale;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, 0, 0, c.width, c.height);
+  return c.toDataURL('image/png');
+}
 
-  const students = [];
-  const isPipnuti = (s) => /p[ií]pnut[ií]/i.test(s);
-  const isPredchozi = (s) => /p[rř]edchoz[ií]/i.test(s);
+// Rozparsuje text jedné jediné kartičky (1. řádek = Jméno, 2. řádek = Pípnutí, 3. řádek = poznámka)
+function parseSingleCardText(rawText, isRedCard) {
+  const lines = String(rawText || '')
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean);
 
-  // Hledáme každý výskyt "Pípnutí:" – nad ním je vždy jméno žáka!
-  for (let i = 0; i < textLines.length; i++) {
-    if (!isPipnuti(textLines[i].text)) continue;
+  if (!lines.length) return null;
 
-    const pipLine = textLines[i];
-    const pipnutiClean = pipLine.text.replace(/^.*?p[ií]pnut[ií]:?\s*/i, '').trim();
+  // Ignorujeme prázdnou kartu s nápisem třídy (např. "2A4")
+  if (lines.length === 1 && /^\d+[A-Z]\d+$/i.test(lines[0])) return null;
 
-    // Jméno žáka je nejbližší platný textový řádek nad "Pípnutí:"
-    let nameLine = null;
-    for (let k = i - 1; k >= 0; k--) {
-      const cand = textLines[k];
-      if (pipLine.y - cand.y > fullCtx.canvas.height * 0.08) break; // moc daleko nahoře
-      if (isPipnuti(cand.text) || isPredchozi(cand.text)) break;
-      // Očistíme případný zbytek ikony fajfky/mínusu na začátku/konci
-      const cleaned = cand.text
-        .replace(/^[^a-zA-ZáčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]+/, '')
-        .replace(/[^a-zA-ZáčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]+$/, '')
-        .trim();
-      // Jméno má alespoň 4 písmena a neobsahuje číslice (aby se nevzalo např. "2A4")
-      if (cleaned.length >= 4 && !/\d/.test(cleaned) && /[a-zA-ZáčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}/.test(cleaned)) {
-        nameLine = { ...cand, cleanName: cleaned };
-        break;
-      }
-    }
+  let name = '';
+  let pipnuti = '';
+  let note = '';
 
-    if (!nameLine) continue;
+  const pipIndex = lines.findIndex(l => /p[ií]pnut[ií]/i.test(l));
 
-    // Pod "Pípnutí:" může být ještě řádek "(předchozí: 1.)"
-    let noteText = '';
-    if (i + 1 < textLines.length && isPredchozi(textLines[i + 1].text)) {
-      if (textLines[i + 1].y - pipLine.y < fullCtx.canvas.height * 0.06) {
-        noteText = textLines[i + 1].text;
-      }
-    }
-
-    // Zkontrolujeme barvu karty v původním obrázku (v pásu od jména po pípnutí)
-    const cardTop = Math.max(0, nameLine.top - 25);
-    const cardHeight = Math.max(50, (pipLine.bottom - cardTop) + 15);
-    const absentByColor = isCardRed(fullCtx, xOffset + 10, cardTop, colWidth - 20, cardHeight);
-    const isAbsent = absentByColor;
-
-    students.push({
-      name: nameLine.cleanName,
-      present: !isAbsent,
-      pipnuti: pipnutiClean || (isAbsent ? 'Ne' : '-'),
-      note: noteText
-    });
+  if (pipIndex > 0) {
+    name = lines[pipIndex - 1];
+    pipnuti = lines[pipIndex].replace(/^.*?p[ií]pnut[ií]:?\s*/i, '').trim();
+    if (lines[pipIndex + 1]) note = lines[pipIndex + 1];
+  } else if (pipIndex === 0) {
+    // Kdyby se jméno náhodou nepřečetlo
+    return null;
+  } else {
+    // Pokud se slovo "Pípnutí" nepřečetlo přesně, první řádek bez čísel je jméno
+    const cand = lines.find(l => !/\d/.test(l) && l.length >= 4);
+    if (!cand) return null;
+    name = cand;
+    const rest = lines.filter(l => l !== cand);
+    if (rest[0]) pipnuti = rest[0].replace(/^.*?p[ií]pnut[ií]:?\s*/i, '').trim();
+    if (rest[1]) note = rest[1];
   }
 
-  return students;
+  // Očistíme jméno od případných artefaktů ikon na začátku/konci
+  name = name
+    .replace(/^[^a-zA-ZáčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]+/, '')
+    .replace(/[^a-zA-ZáčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]+$/, '')
+    .trim();
+
+  // Musí to být jméno (alespoň 4 znaky, bez čísel, alespoň dvě slova nebo jedno delší)
+  if (name.length < 4 || /\d/.test(name)) return null;
+
+  return {
+    name,
+    present: !isRedCard,
+    pipnuti: pipnuti || (isRedCard ? 'Ne' : '-'),
+    note
+  };
 }
 
 // Původní parser pro obecné tabulky
@@ -525,13 +582,7 @@ async function recognize() {
       workerLang = '';
     }
     if (!worker) {
-      worker = await Tesseract.createWorker(lang, 1, {
-        logger: m => {
-          if (typeof m.progress === 'number') {
-            elements.progress.value = m.progress;
-          }
-        }
-      });
+      worker = await Tesseract.createWorker(lang, 1);
       workerLang = lang;
     }
 
@@ -540,20 +591,44 @@ async function recognize() {
     if (mode === 'attendance') {
       const studentMap = new Map();
       const totalImgs = imageFiles.length;
+      const lessonTitles = [];
 
       for (let i = 0; i < totalImgs; i++) {
-        const { canvas, ctx } = await prepareImageCanvas(imageFiles[i].url, 2);
-        const columns = sliceColumnsFromCanvas(canvas);
-        let parsedStudents = [];
+        status(`Hodina ${i + 1}/${totalImgs}: hledám kartičky žáků…`);
+        const { canvas, ctx, width, height } = await loadOriginalCanvas(imageFiles[i].url);
 
-        for (let c = 0; c < columns.length; c++) {
-          status(`Hodina ${i + 1}/${totalImgs}: čtu sloupec karet ${c + 1} ze 3…`);
-          const result = await worker.recognize(columns[c].dataUrl, {}, { tsv: true });
-          const data = result.data || {};
-          allLiteralText.push(`--- Hodina ${i + 1}, Sloupec ${c + 1} ---\n` + (data.text || '').trim());
-          const colStudents = parseSingleColumn(data.tsv, ctx, columns[c].xOffset, columns[c].width);
-          parsedStudents.push(...colStudents);
+        // Přečteme hlavičku nahoře (jestli tam je např. "Hodina 3.")
+        let lessonLabel = `Hodina ${i + 1}`;
+        try {
+          const headC = document.createElement('canvas');
+          headC.width = Math.round(width * 0.45);
+          headC.height = Math.round(height * 0.09);
+          headC.getContext('2d').drawImage(canvas, 0, 0, headC.width, headC.height, 0, 0, headC.width, headC.height);
+          const headRes = await worker.recognize(headC.toDataURL('image/png'));
+          const hMatch = (headRes.data?.text || '').match(/Hodina\s*\d+\.?/i);
+          if (hMatch) lessonLabel = hMatch[0].trim();
+        } catch (_) {}
+        lessonTitles.push(lessonLabel);
+
+        const detectedCards = detectCardGrid(ctx, width, height);
+        let parsedStudents = [];
+        let imgLiteral = [`=== ${lessonLabel} (${imageFiles[i].name}) – nalezeno ${detectedCards.length} polí ===`];
+
+        for (let c = 0; c < detectedCards.length; c++) {
+          elements.progress.value = (i + (c + 1) / Math.max(1, detectedCards.length)) / totalImgs;
+          if (c % 4 === 0) {
+            status(`${lessonLabel} (${i + 1}/${totalImgs}): čtu kartu ${c + 1} z ${detectedCards.length}…`);
+          }
+          const cardDataUrl = cropCardForOcr(canvas, detectedCards[c]);
+          const res = await worker.recognize(cardDataUrl);
+          const rawCardText = (res.data?.text || '').trim();
+          imgLiteral.push(`[Karta ${c + 1} | ${detectedCards[c].isRed ? 'ČERVENÁ' : 'BÍLÁ'}]: ${rawCardText.replace(/\n+/g, ' / ')}`);
+
+          const st = parseSingleCardText(rawCardText, detectedCards[c].isRed);
+          if (st) parsedStudents.push(st);
         }
+
+        allLiteralText.push(imgLiteral.join('\n'));
 
         for (const st of parsedStudents) {
           const key = normKey(st.name);
@@ -584,10 +659,7 @@ async function recognize() {
       );
 
       if (sortedStudents.length) {
-        const tableHeaders = ['Jméno a příjmení', 'Přítomen (hodin)', 'Nepřítomen (hodin)'];
-        for (let i = 0; i < totalImgs; i++) {
-          tableHeaders.push(`Hodina ${i + 1}`);
-        }
+        const tableHeaders = ['Jméno a příjmení', 'Přítomen (hodin)', 'Nepřítomen (hodin)', ...lessonTitles];
         const matrix = sortedStudents.map(st => [
           st.displayName,
           String(st.presentCount),
@@ -603,8 +675,8 @@ async function recognize() {
 
     } else {
       status('Připravuji obrázek pro obecnou tabulku…');
-      const { dataUrl } = await prepareImageCanvas(imageFiles[0].url, 1);
-      const result = await worker.recognize(dataUrl, {}, { tsv: true });
+      const { canvas } = await loadOriginalCanvas(imageFiles[0].url);
+      const result = await worker.recognize(canvas.toDataURL('image/png'), {}, { tsv: true });
       const data = result.data || {};
       const parsed = parseTsvGeneric(data.tsv);
       elements.literal.textContent = data.text || 'OCR nevrátilo žádný text.';
