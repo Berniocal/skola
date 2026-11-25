@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101923"><title>Kriminalistická laboratoř | Zvuková stopa</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101923;color:#e7edf5;font:16px system-ui,sans-serif;line-height:1.5}main{max-width:1000px;margin:auto;padding:20px 16px 40px}header{border-bottom:1px solid #344252;padding-bottom:16px;margin-bottom:16px}h1{font-size:clamp(24px,5vw,36px);margin:6px 0}h2{font-size:19px;margin:0 0 10px}p{margin:8px 0}.eyebrow{font-size:12px;letter-spacing:.16em;color:#f1b965;font-weight:700}.panel{background:#182431;border:1px solid #344252;border-radius:14px;padding:16px;margin:14px 0}.muted{color:#aab9c8;font-size:14px}button,a.download{font:inherit;color:#e7edf5;background:#25374a;border:1px solid #4b6075;border-radius:8px;padding:10px 13px;cursor:pointer;min-height:44px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}button:hover,a.download:hover{background:#354d65}button:focus-visible,input:focus-visible,canvas:focus-visible,a:focus-visible{outline:3px solid #f1b965;outline-offset:2px}.primary{background:#f1b965;color:#17212a;border-color:#f1b965;font-weight:700}.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0}.clock{font-variant-numeric:tabular-nums;font-size:clamp(25px,6vw,38px);font-weight:700;color:#f1b965}.clockrow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}.chart{display:block;width:100%;height:235px;background:#101923;border:1px solid #344252;border-radius:8px;touch-action:none;cursor:crosshair}.overview{height:75px}.axislabel{display:flex;justify-content:space-between;font-size:12px;color:#aab9c8;margin:5px 0}input[type=range]{width:100%;accent-color:#f1b965;min-height:28px}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{padding:8px 4px;border-bottom:1px solid #344252;text-align:center}th{font-size:13px;color:#aab9c8}th:first-child{width:12%}td input{width:100%;min-width:0;background:#101923;color:#e7edf5;border:1px solid #52677c;border-radius:6px;padding:9px 4px;font:inherit;text-align:center;font-variant-numeric:tabular-nums}td button{font-size:12px;padding:4px;min-height:35px;width:100%;margin-top:5px}.mean{display:flex;align-items:center;gap:10px;margin-top:15px;flex-wrap:wrap}.mean input{width:120px;background:#101923;color:#e7edf5;border:1px solid #52677c;border-radius:6px;padding:10px;font:inherit}.tag{color:#f1b965;font-size:12px;letter-spacing:.09em}details summary{cursor:pointer;font-weight:600}audio{display:none}@media(max-width:550px){main{padding:14px 10px 30px}.panel{padding:12px}.chart{height:200px}.overview{height:65px}button{padding:9px 10px}}
+</style></head><body><main>
+<header><div class="eyebrow">KRIMINALISTICKÁ LABORATOŘ / DŮKAZ 05</div><h1>Zvuková stopa</h1><p class="muted">Vloupání do školy · záznam z učebny · 18,5 s</p></header>
+<section class="panel"><h2>Popis případu</h2><p>Při nočním vloupání do školy pachatel nechtěně spustil poruchovou signalizaci zařízení v učebně. Aby na sebe neupozornil, snažil se každý výstražný tón co nejrychleji umlčet stisknutím tlačítka. Signalizace se však opakovaně ozývala.</p><p>V učebně probíhalo dlouhodobé měření hluku. Počítač s mikrofonem zachytil pět výstražných tónů a následná cvaknutí tlačítka. Určete reakční dobu pachatele.</p></section>
+<section class="panel"><div class="clockrow"><div><div class="tag">ČAS KURZORU</div><div id="clock" class="clock" aria-live="off">0,000 s</div></div><div class="controls"><button id="play" class="primary">▶ Přehrát</button><button id="rewind">↶ Začátek</button></div></div>
+<audio id="audio" preload="auto"></audio>
+<div class="axislabel"><span>Přehled celého záznamu</span><span>0 – 18,5 s</span></div>
+<canvas id="overview" class="chart overview" aria-label="Přehled zvuku; dotykem přesunete zobrazení"></canvas>
+<div class="controls"><button id="minus" aria-label="Oddálit">− Oddálit</button><button id="plus" aria-label="Přiblížit">+ Přiblížit</button><button id="all">Celý záznam</button><span class="muted" id="range"></span></div>
+<canvas id="wave" class="chart" tabindex="0" aria-label="Zvuková stopa. Tažením posouvejte kurzor, šipkami měňte čas po jedné milisekundě."></canvas>
+<div class="axislabel"><span>Amplituda zvuku (relativní)</span><span>Čas [s]</span></div>
+<label class="muted" for="pan">Posun zobrazeného úseku</label><input id="pan" type="range" min="0" max="0" step=".001" value="0">
+<div class="controls"><button id="left">− 1 ms</button><button id="right">+ 1 ms</button><a id="download" class="download" download="dukaz-05.wav">Stáhnout WAV</a></div>
+<p class="muted">Dotykem nebo tažením po grafu posouvejte žlutý kurzor. Přibližte si pípnutí a cvaknutí. Čas odečítejte na začátku každého zvuku, nikoliv na jeho vrcholu. Přehledem nahoře se můžete přesunout k dalšímu pokusu.</p></section>
+<section class="panel"><h2>Vyšetřovací protokol</h2><p class="muted">Zapište časy v sekundách nebo použijte tlačítka „Převzít čas“. Rozdíly a průměr vypočítejte sami.</p>
+<table><thead><tr><th>Pokus</th><th>Začátek tónu [s]</th><th>Stisk tlačítka [s]</th><th>Reakční doba [ms]</th></tr></thead><tbody id="rows"></tbody></table>
+<label class="mean">Průměrná reakční doba <input id="mean" inputmode="decimal" aria-label="Průměrná reakční doba"> ms</label><div class="controls"><button id="reset">Vymazat protokol</button></div></section>
+<p class="muted">Výuková simulace. Reakční doba není jednoznačným identifikačním znakem.</p></main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), D=18.5, sr=24000, N=Math.round(D*sr), pcm=new Int16Array(N);
+const events=[[1.83,2.07],[4.71,4.99],[8.12,8.37],[11.06,11.35],[15.23,15.49]];
+let seed=84917;function noise(){seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296*2-1}
+for(const [a,b] of events){const start=Math.round(a*sr),end=Math.round(b*sr);
+ for(let i=start;i<end;i++){const t=(i-start)/sr,remain=(end-i)/sr,env=Math.min(1,t/.002,remain/.001);pcm[i]=Math.round(32767*env*(.36*Math.sin(2*Math.PI*960*t)+.08*Math.sin(2*Math.PI*1920*t)))}
+ for(let j=0;j<Math.round(.032*sr);j++){const t=j/sr,env=Math.exp(-t/0.006);pcm[end+j]=Math.round(32767*env*(.5*noise()+.32*Math.cos(2*Math.PI*1700*t)))}
+}
+const wav=new ArrayBuffer(44+N*2),dv=new DataView(wav);function str(p,s){for(let i=0;i<s.length;i++)dv.setUint8(p+i,s.charCodeAt(i))}
+str(0,'RIFF');dv.setUint32(4,36+N*2,true);str(8,'WAVE');str(12,'fmt ');dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);dv.setUint16(34,16,true);str(36,'data');dv.setUint32(40,N*2,true);for(let i=0;i<N;i++)dv.setInt16(44+i*2,pcm[i],true);
+const url=URL.createObjectURL(new Blob([wav],{type:'audio/wav'})),audio=$('audio');audio.src=url;$('download').href=url;
+let cursor=0,lo=0,span=D,drag=false;const clamp=(v,a,b)=>Math.min(b,Math.max(a,v)),fmt=(t,n=3)=>t.toFixed(n).replace('.',',');
+function resize(c){const r=c.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,3),w=Math.max(1,Math.round(r.width*d)),h=Math.max(1,Math.round(r.height*d));if(c.width!==w||c.height!==h){c.width=w;c.height=h}const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);return [x,r.width,r.height]}
+function draw(c,start,duration,small){const [x,w,h]=resize(c),base=(h-(small?0:25))/2,amp=base*.92,px=t=>(t-start)/duration*w;
+ x.clearRect(0,0,w,h);x.fillStyle='#101923';x.fillRect(0,0,w,h);
+ if(small){x.fillStyle='#f1b96524';x.fillRect(lo/D*w,0,span/D*w,h)}else{const goal=duration/(w<500?5:9),steps=[.001,.002,.005,.01,.02,.05,.1,.2,.5,1,2,5,10],step=steps.find(v=>v>=goal)||10;x.font='11px system-ui';x.textAlign='center';for(let t=Math.ceil((start-1e-8)/step)*step;t<=start+duration+1e-8;t+=step){const z=px(t);x.strokeStyle='#344252';x.beginPath();x.moveTo(z,0);x.lineTo(z,h-23);x.stroke();if(z>18&&z<w-18){x.fillStyle='#aab9c8';x.fillText(fmt(t,step<.01?3:step<.1?2:step<1?1:0),z,h-7)}}}
+ x.strokeStyle='#40566a';x.beginPath();x.moveTo(0,base);x.lineTo(w,base);x.stroke();
+ x.strokeStyle='#7ad6c9';x.lineWidth=1;x.beginPath();
+ for(let k=0;k<Math.ceil(w);k++){let a=Math.max(0,Math.floor((start+k/w*duration)*sr)),b=Math.min(N,Math.max(a+1,Math.ceil((start+(k+1)/w*duration)*sr))),min=0,max=0;for(let i=a;i<b;i++){const v=pcm[i];if(v<min)min=v;if(v>max)max=v}x.moveTo(k+.5,base-max/32768*amp);x.lineTo(k+.5,base-min/32768*amp)}x.stroke();
+ const z=px(cursor);if(z>=0&&z<=w){x.strokeStyle='#f1b965';x.lineWidth=2;x.beginPath();x.moveTo(z,0);x.lineTo(z,h-(small?0:23));x.stroke();if(!small){x.fillStyle='#f1b965';x.beginPath();x.moveTo(z-6,0);x.lineTo(z+6,0);x.lineTo(z,9);x.fill()}}
+ if(small){x.strokeStyle='#f1b965';x.lineWidth=1;x.strokeRect(lo/D*w+.5,.5,Math.max(0,span/D*w-1),h-1)}
+}
+function render(){$('clock').textContent=fmt(cursor)+' s';$('range').textContent=fmt(lo,2)+' – '+fmt(lo+span,2)+' s';$('pan').max=Math.max(0,D-span);$('pan').value=lo;$('pan').disabled=span>=D;$('minus').disabled=span>=D;$('plus').disabled=span<=.12;draw($('overview'),0,D,true);draw($('wave'),lo,span,false)}
+function seek(t,follow=false){cursor=clamp(t,0,D);if(follow&&(cursor<lo||cursor>lo+span))lo=clamp(cursor-span/2,0,D-span);if(audio.readyState)audio.currentTime=cursor;render()}
+function zoom(f){const center=cursor>=lo&&cursor<=lo+span?cursor:lo+span/2;span=clamp(span*f,.12,D);lo=clamp(center-span/2,0,D-span);render()}
+$('plus').onclick=()=>zoom(.5);$('minus').onclick=()=>zoom(2);$('all').onclick=()=>{lo=0;span=D;render()};$('pan').oninput=e=>{lo=Number(e.target.value);render()};
+$('rewind').onclick=()=>{audio.pause();seek(0,true)};$('left').onclick=()=>{audio.pause();seek(cursor-.001,true)};$('right').onclick=()=>{audio.pause();seek(cursor+.001,true)};
+$('play').onclick=async()=>{if(!audio.paused){audio.pause();return}try{audio.currentTime=cursor>=D?0:cursor;await audio.play()}catch(e){alert('Zvuk se nepodařilo přehrát. Zkuste to znovu.')}};
+let raf=0;function tick(){cursor=audio.currentTime;if(cursor<lo||cursor>lo+span)lo=clamp(cursor-span*.15,0,D-span);render();if(!audio.paused)raf=requestAnimationFrame(tick)}
+audio.onplay=()=>{$('play').textContent='⏸ Pozastavit';cancelAnimationFrame(raf);tick()};audio.onpause=()=>{$('play').textContent='▶ Přehrát';cancelAnimationFrame(raf)};audio.onended=()=>{cursor=D;render()};
+function pointer(e,c,small){const r=c.getBoundingClientRect(),p=clamp((e.clientX-r.left)/r.width,0,1);audio.pause();if(small){cursor=p*D;lo=clamp(cursor-span/2,0,D-span);seek(cursor)}else seek(lo+p*span)}
+for(const [c,small] of [[$('wave'),false],[$('overview'),true]]){c.addEventListener('pointerdown',e=>{if(e.button!==0)return;drag=true;c.setPointerCapture(e.pointerId);pointer(e,c,small)});c.addEventListener('pointermove',e=>{if(drag&&c.hasPointerCapture(e.pointerId))pointer(e,c,small)});for(const name of ['pointerup','pointercancel','lostpointercapture'])c.addEventListener(name,()=>drag=false)}
+$('wave').addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();audio.pause();seek(cursor+(e.key==='ArrowLeft'?-1:1)*(e.shiftKey?.01:.001),true)}});$('wave').addEventListener('wheel',e=>{if(e.ctrlKey){e.preventDefault();zoom(e.deltaY>0?2:.5)}},{passive:false});
+const key='krimi-zvuk-protokol-v1';let saved={};try{saved=JSON.parse(localStorage.getItem(key)||'{}')||{}}catch(e){}
+function store(){const data={};document.querySelectorAll('#rows input,#mean').forEach(el=>data[el.id]=el.value);try{localStorage.setItem(key,JSON.stringify(data))}catch(e){}}
+for(let i=1;i<=5;i++){const tr=document.createElement('tr');tr.innerHTML='<td>'+i+'.</td>'+['a','b','d'].map((k,j)=>'<td><input id="'+k+i+'" inputmode="decimal" aria-label="Pokus '+i+', '+['začátek tónu','stisk tlačítka','reakční doba'][j]+'">'+(j<2?'<button type="button" data-target="'+k+i+'">Převzít čas</button>':'')+'</td>').join('');$('rows').append(tr)}
+document.querySelectorAll('#rows input,#mean').forEach(el=>{el.value=saved[el.id]||'';el.addEventListener('input',store)});
+$('rows').addEventListener('click',e=>{const id=e.target.dataset.target;if(id){$(id).value=fmt(cursor);store()}});
+$('reset').onclick=()=>{if(confirm('Vymazat všechny zapsané hodnoty?')){document.querySelectorAll('#rows input,#mean').forEach(el=>el.value='');store()}};
+new ResizeObserver(render).observe($('wave'));render();
+</script></body></html>
